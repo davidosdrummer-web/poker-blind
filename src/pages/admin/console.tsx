@@ -98,21 +98,25 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       const remaining = levelRemainingMs(t, now);
       if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
         console.log('🔵 Автоматическое повышение уровня...');
-        const err = actions.nextLevel(t.id);
-        if (err) {
-          toast(err, "err");
-        } else {
-          toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
-          onRefresh();
-        }
+        (async () => {
+          const err = await actions.nextLevel(t.id);
+          if (err) {
+            toast(err, "err");
+          } else {
+            toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
+            onRefresh();
+          }
+        })();
       }
     }
     
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
       console.log('🔵 Автоматический выход с перерыва...');
-      actions.endBreak(t.id);
-      toast("Перерыв завершён — игра продолжается", "info");
-      onRefresh();
+      (async () => {
+        await actions.endBreak(t.id);
+        toast("Перерыв завершён — игра продолжается", "info");
+        onRefresh();
+      })();
     }
   }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
 
@@ -138,16 +142,16 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
   useHotkeys({
     " ": () => { if (modal === "") togglePause(); },
-    n: () => { 
+    n: async () => { 
       if (modal !== "") return;
-      const err = actions.nextLevel(t.id); 
+      const err = await actions.nextLevel(t.id); 
       if (err) toast(err, "err"); 
       else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
     },
-    p: () => { if (modal === "") { actions.prevLevel(t.id); onRefresh(); } },
-    b: () => { 
+    p: async () => { if (modal === "") { await actions.prevLevel(t.id); onRefresh(); } },
+    b: async () => { 
       if (modal === "" && t.status === "active") { 
-        actions.startBreak(t.id, breakMin); 
+        await actions.startBreak(t.id, breakMin); 
         toast(`Перерыв ${breakMin} мин`, "info"); 
         onRefresh();
       } 
@@ -271,16 +275,16 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
               ? <>поздняя регистрация: <b className="tabular font-mono text-gold-300">{fmtClock(lateRem / 1000)}</b></>
               : "поздняя регистрация закрыта"}
           </span>
-          <button onClick={() => { 
-            actions.adjustLateReg(t.id, 15); 
+          <button onClick={async () => { 
+            await actions.adjustLateReg(t.id, 15); 
             toast("Поздняя регистрация +15 мин", "info"); 
             onRefresh();
           }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-gold-500 hover:text-ink-950">
             +15 мин
           </button>
           {lateOpen && (
-            <button onClick={() => { 
-              actions.adjustLateReg(t.id, -99999); 
+            <button onClick={async () => { 
+              await actions.adjustLateReg(t.id, -99999); 
               toast("Поздняя регистрация закрыта", "info"); 
               onRefresh();
             }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-danger-500">
@@ -327,8 +331,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
             <div className="mt-5 grid w-full grid-cols-2 gap-2">
               {isBreak ? (
-                <Button variant="felt" onClick={() => { 
-                  actions.endBreak(t.id); 
+                <Button variant="felt" onClick={async () => { 
+                  await actions.endBreak(t.id); 
                   toast("Перерыв завершён", "ok"); 
                   onRefresh();
                 }}>
@@ -343,33 +347,33 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 <Select value={String(breakMin)} onChange={(e) => setBreakMin(Number(e.target.value))} className="w-[76px] px-2 text-xs">
                   {[10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} мин</option>)}
                 </Select>
-                <Button variant="outline" className="flex-1" disabled={isBreak || isProcessing} onClick={() => { 
-                  actions.startBreak(t.id, breakMin); 
+                <Button variant="outline" className="flex-1" disabled={isBreak || isProcessing} onClick={async () => { 
+                  await actions.startBreak(t.id, breakMin); 
                   toast(`Перерыв ${breakMin} мин`, "info"); 
                   onRefresh();
                 }}>
                   <Coffee size={14} /> Перерыв
                 </Button>
               </div>
-              <Button variant="dark" disabled={t.currentLevel === 0} onClick={() => { actions.prevLevel(t.id); onRefresh(); }}>
+              <Button variant="dark" disabled={t.currentLevel === 0} onClick={async () => { await actions.prevLevel(t.id); onRefresh(); }}>
                 <ArrowLeft size={14} /> Пред. уровень
               </Button>
-              <Button variant="dark" onClick={() => { 
-                const err = actions.nextLevel(t.id); 
+              <Button variant="dark" onClick={async () => { 
+                const err = await actions.nextLevel(t.id); 
                 if (err) toast(err, "err"); 
                 else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
               }}>
                 След. уровень <ArrowRight size={14} />
               </Button>
-              <Button variant="outline" onClick={() => { 
-                actions.adjustTimer(t.id, -60); 
+              <Button variant="outline" onClick={async () => { 
+                await actions.adjustTimer(t.id, -60); 
                 toast("−1 минута", "info"); 
                 onRefresh();
               }}>
                 <Minus size={14} /> 1 мин
               </Button>
-              <Button variant="outline" onClick={() => { 
-                actions.adjustTimer(t.id, 60); 
+              <Button variant="outline" onClick={async () => { 
+                await actions.adjustTimer(t.id, 60); 
                 toast("+1 минута", "info"); 
                 onRefresh();
               }}>
@@ -416,12 +420,12 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 return (
                   <div key={idx}>
                     <button
-                      onClick={() => { 
+                      onClick={async () => { 
                         while (idx > t.currentLevel) { 
-                          const err = actions.nextLevel(t.id); 
+                          const err = await actions.nextLevel(t.id); 
                           if (err) break; 
                         } 
-                        while (idx < t.currentLevel) actions.prevLevel(t.id); 
+                        while (idx < t.currentLevel) await actions.prevLevel(t.id); 
                         onRefresh();
                       }}
                       className={cx(
