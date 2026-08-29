@@ -10,7 +10,7 @@ import type { DB, Registration, TableState, Template, Tournament, TournamentType
 import {
   computeBoard, cx, fmtDuration, fullName, scoringText, structureMinutes, totalSeats, uid, TYPE_LABELS,
 } from "../../lib/formulas";
-import { Badge, Button, Card, Field, Input, Modal, Select, Toggle, toast } from "../../components/ui";
+import { Avatar, Badge, Button, Card, Field, Input, Modal, Select, Toggle, toast } from "../../components/ui";
 import { BonusDefsEditor, ScoringEditor, StructureEditor, TablesEditor, type ParticipantLite } from "../../components/editors";
 import { SuitsRow } from "../../components/icons";
 
@@ -218,13 +218,13 @@ export default function TournamentEditorPage() {
       <nav className="sticky top-[73px] z-20 -mx-6 mb-6 border-b border-ink-800/70 bg-ink-950/85 px-6 backdrop-blur">
         <div className="flex gap-1 overflow-x-auto">
           {SECTIONS.map((s) => (
-            <a
+            <button
               key={s.id}
-              href={`#sec-${s.id}`}
+              onClick={() => document.getElementById(`sec-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
               className="inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2.5 text-sm font-semibold text-ink-300 transition-colors hover:border-gold-500/50 hover:text-gold-300"
             >
               <s.icon size={14} /> {s.label}
-            </a>
+            </button>
           ))}
           <span className="ml-auto hidden items-center gap-2 py-2.5 font-mono text-[11px] text-ink-500 md:flex">
             длительность: <b className="text-gold-300">{fmtDuration(totalMin)}</b>
@@ -309,9 +309,7 @@ export default function TournamentEditorPage() {
               <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
                 {filteredFree.map((u) => (
                   <div key={u.id} className="flex items-center gap-2.5 rounded-lg border border-ink-700/70 bg-ink-800/50 px-3 py-2 transition-colors hover:border-gold-500/40">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full font-mono text-[10px] font-bold" style={{ background: `hsl(${u.hue} 45% 22%)`, color: `hsl(${u.hue} 80% 72%)` }}>
-                      {u.nickname.slice(0, 2).toUpperCase()}
-                    </span>
+                    <Avatar name={fullName(u)} hue={u.hue} size={30} photo={u.photoURL} />
                     <span className="min-w-0 flex-1 leading-tight">
                       <span className="block truncate text-xs font-bold text-cream-100">{u.nickname}</span>
                       <span className="block truncate text-[10px] text-ink-500">{fullName(u)}</span>
@@ -340,9 +338,7 @@ export default function TournamentEditorPage() {
                   if (!u) return null;
                   return (
                     <div key={r.userId} className="flex items-center gap-2.5 rounded-lg border border-ink-700/70 bg-ink-800/50 px-3 py-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-full font-mono text-[10px] font-bold" style={{ background: `hsl(${u.hue} 45% 22%)`, color: `hsl(${u.hue} 80% 72%)` }}>
-                        {u.nickname.slice(0, 2).toUpperCase()}
-                      </span>
+                      <Avatar name={fullName(u)} hue={u.hue} size={30} photo={u.photoURL} />
                       <span className="min-w-0 flex-1 leading-tight">
                         <span className="block truncate text-xs font-bold text-cream-100">{u.nickname}</span>
                         <span className="block truncate text-[10px] text-ink-500">{fullName(u)}</span>

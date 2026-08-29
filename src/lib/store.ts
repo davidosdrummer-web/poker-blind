@@ -4,8 +4,8 @@ import type {
 } from "../types";
 import { buildSeed } from "./seed";
 import {
-  emptyStats, freshAchievements, isLateRegOpen, itmCutoff, levelDurationMs, levelRemainingMs,
-  provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
+  computeBoard, emptyStats, freshAchievements, isLateRegOpen, itmCutoff, levelDurationMs,
+  levelRemainingMs, provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
 } from "./formulas";
 
 /* ============================================================
@@ -202,7 +202,7 @@ export const actions = {
         id, email: em, password: opts.password,
         firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
         nickname: opts.nickname.trim(), phone: opts.phone.trim(),
-        role: "player", hue: Math.floor(Math.random() * 360),
+        role: "player", hue: Math.floor(Math.random() * 360), photoURL: null,
         registeredAt: Date.now(), isBlocked: false, archived: false, manualPoints: 0,
         stats: emptyStats(), achievements: [],
       });
@@ -216,7 +216,7 @@ export const actions = {
   /** Создание учётной записи администратором — попадает в общую базу клуба. */
   createPlayer(opts: {
     email: string; password: string; firstName: string; lastName: string; nickname: string;
-    phone: string; hue: number; registeredAt: number; manualPoints: number;
+    phone: string; hue: number; registeredAt: number; manualPoints: number; photoURL?: string | null;
   }): string | null {
     const em = opts.email.trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return "Некорректный email";
@@ -229,7 +229,7 @@ export const actions = {
         id, email: em, password: opts.password,
         firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
         nickname: opts.nickname.trim(), phone: opts.phone.trim(),
-        role: "player", hue: opts.hue,
+        role: "player", hue: opts.hue, photoURL: opts.photoURL ?? null,
         registeredAt: opts.registeredAt || Date.now(),
         isBlocked: false, archived: false,
         manualPoints: Math.max(0, Math.round(opts.manualPoints || 0)),
@@ -259,7 +259,7 @@ export const actions = {
     mutate((db) => touchPresence(db, userId, tournamentId));
   },
 
-  updateProfile(userId: string, patch: Partial<Pick<User, "firstName" | "lastName" | "nickname" | "phone" | "hue">>): string | null {
+  updateProfile(userId: string, patch: Partial<Pick<User, "firstName" | "lastName" | "nickname" | "phone" | "hue" | "photoURL">>): string | null {
     if (patch.nickname !== undefined && !patch.nickname.trim()) return "Никнейм не может быть пустым";
     mutate((db) => {
       const u = findUser(db, userId);
@@ -755,6 +755,66 @@ export const actions = {
       notice(db, "all", `«${tt.name}» завершён — побеждает ${winner ? nicknameOf(db, winner.userId) : "—"}!`, "win");
     });
     return null;
+  },
+
+  /* ---------- финал сезона: топ-18, очки не начисляются ---------- */
+
+  createSeasonFinal(seasonId: string): string | null {
+    const season = state.seasons.find((x) => x.id === seasonId);
+    if (!season) return "Сезон не найден";
+    if (state.tournaments.some((t) => t.seasonFinal && t.seasonId === seasonId)) return "Финальный турнир сезона уже создан";
+    const board = computeBoard(state, seasonId);
+    const top = board.slice(0, 18).map((b) => b.userId);
+    if (top.length < 2) return "В зачёте сезона меньше двух игроков — финал невозможен";
+
+    const id = uid("tr");
+    const date = new Date(Date.now() + 7 * 86400_000);
+    date.setHours(19, 0, 0, 0);
+
+    // столы: по 9 мест, «змейка» по рейтингу
+    const nTables = Math.max(1, Math.ceil(top.length / 9));
+    const tables = Array.from({ length: nTables }, (_, i) => ({
+      number: i + 1, isFinal: nTables === 1, capacity: 9, seats: Array(9).fill(null) as (string | null)[],
+    }));
+    top.forEach((userId, i) => {
+      const round = Math.floor(i / nTables);
+      const pos = i % nTables;
+      const tableIdx = round % 2 === 0 ? pos : nTables - 1 - pos;
+      const tb = tables[tableIdx];
+      const seatIdx = tb.seats.indexOf(null);
+      if (seatIdx >= 0) tb.seats[seatIdx] = userId;
+    });
+
+    mutate((db) => {
+      db.tournaments.unshift({
+        id,
+        name: `Финал сезона · ${season.name}`,
+        templateId: null, seasonId,
+        date: date.toISOString(),
+        description: "Финальный турнир сезона для топ-18 рейтинга. Очки не начисляются, в зачёт рейтингов не входит.",
+        type: "freezeout", maxPlayers: 18, startingChips: 30000,
+        levels: [
+          { sb: 50, bb: 100, ante: 0, duration: 15 }, { sb: 100, bb: 200, ante: 0, duration: 15 },
+          { sb: 150, bb: 300, ante: 0, duration: 15 }, { sb: 200, bb: 400, ante: 50, duration: 15 },
+          { sb: 300, bb: 600, ante: 75, duration: 15 }, { sb: 400, bb: 800, ante: 100, duration: 15 },
+          { sb: 600, bb: 1200, ante: 150, duration: 15 }, { sb: 800, bb: 1600, ante: 200, duration: 15 },
+          { sb: 1200, bb: 2400, ante: 300, duration: 15 }, { sb: 2000, bb: 4000, ante: 500, duration: 15 },
+        ],
+        breaks: [{ afterLevel: 3, duration: 20 }, { afterLevel: 6, duration: 20 }],
+        rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
+        lateRegMinutes: 30, lateRegUntil: null,
+        bonusDefs: [{ name: "Чип-бонус", chips: 10000 }],
+        scoring: { grid: [], participation: 0, knockoutPoints: 0, knockoutEnabled: false },
+        status: "registration", regOpen: false,
+        currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
+        registrations: top.map((userId) => ({ userId, status: "checked-in" as const, registeredAt: Date.now(), checkedInAt: Date.now() })),
+        tables, knockouts: [], rebuys: [], bonuses: [], results: null,
+        seasonFinal: true,
+        createdBy: sessionUid ?? "u_admin", createdAt: Date.now(),
+      });
+      notice(db, "all", `Сформирован финал сезона «${season.name}» — топ-18 в списке`, "win");
+    });
+    return id;
   },
 
   /* ---------- экраны, настройки, уведомления ---------- */

@@ -53,6 +53,8 @@ export interface User {
   role: Role;
   /** оттенок аватара, 0–360 */
   hue: number;
+  /** загруженное фото (dataURL), null — инициалы */
+  photoURL: string | null;
   registeredAt: number;
   isBlocked: boolean;
   archived: boolean;
@@ -151,6 +153,8 @@ export interface Tournament {
   rebuys: RebuyRecord[];
   bonuses: BonusRecord[];
   results: ResultEntry[] | null;
+  /** финал сезона: топ-18, очки не начисляются, вне зачёта рейтингов */
+  seasonFinal?: boolean;
   createdBy: string;
   createdAt: number;
 }

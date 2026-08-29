@@ -242,6 +242,7 @@ export function computeBoard(db: DB, seasonId: string | null): BoardRow[] {
   });
   for (const t of db.tournaments) {
     if (!t.results) continue;
+    if (t.seasonFinal) continue; // финал сезона вне зачёта
     if (seasonId && t.seasonId !== seasonId) continue;
     for (const r of t.results) {
       let row = acc.get(r.userId);

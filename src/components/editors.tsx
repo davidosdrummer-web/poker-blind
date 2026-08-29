@@ -367,7 +367,7 @@ export function TablesEditor({ tables, onChange, participants, ratingOf }: {
               className="flex cursor-grab items-center gap-2 rounded-lg border border-ink-700 bg-ink-800/70 px-2 py-1.5 transition-colors hover:border-gold-500/50 active:cursor-grabbing"
             >
               <GripVertical size={13} className="shrink-0 text-ink-500" />
-              <Avatar name={fullName(p.user)} hue={p.user.hue} size={24} />
+              <Avatar name={fullName(p.user)} hue={p.user.hue} size={24} photo={p.user.photoURL} />
               <span className="min-w-0 flex-1 truncate text-xs font-semibold text-cream-100">{p.user.nickname}</span>
               {p.checked ? <Badge tone="felt">чекин</Badge> : <Badge tone="ink">записан</Badge>}
             </div>
@@ -425,7 +425,7 @@ export function TablesEditor({ tables, onChange, participants, ratingOf }: {
                         className="group flex w-full cursor-grab items-center gap-1.5 px-1.5 active:cursor-grabbing"
                         title="Перетащите на другое место"
                       >
-                        <Avatar name={fullName(u)} hue={u.hue} size={24} />
+                        <Avatar name={fullName(u)} hue={u.hue} size={24} photo={u.photoURL} />
                         <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-cream-100">{u.nickname}</span>
                         <button onClick={() => unseat(u.id)} className="text-ink-500 opacity-0 transition-opacity hover:text-danger-400 group-hover:opacity-100" title="Убрать со стола">
                           <X size={12} />

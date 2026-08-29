@@ -65,13 +65,13 @@ function buildUsers(): User[] {
     {
       id: "u_admin", email: "admin@tuz.club", password: "poker123",
       firstName: "Виктор", lastName: "Орлов", nickname: "Директор", phone: "+7 916 000-00-01",
-      role: "admin", hue: 43, registeredAt: now - 400 * day, isBlocked: false, archived: false, manualPoints: 0,
+      role: "admin", hue: 43, photoURL: null, registeredAt: now - 400 * day, isBlocked: false, archived: false, manualPoints: 0,
       stats: genStats(3), achievements: ["ach_first"],
     },
     {
       id: "u_op", email: "op@tuz.club", password: "poker123",
       firstName: "Марина", lastName: "Соколова", nickname: "Крупье", phone: "+7 916 000-00-02",
-      role: "operator", hue: 160, registeredAt: now - 350 * day, isBlocked: false, archived: false, manualPoints: 0,
+      role: "operator", hue: 160, photoURL: null, registeredAt: now - 350 * day, isBlocked: false, archived: false, manualPoints: 0,
       stats: genStats(6), achievements: ["ach_first"],
     },
   ];
@@ -89,6 +89,7 @@ function buildUsers(): User[] {
       phone: `+7 9${(10 + i).toString().padStart(2, "0")} ${100 + i * 3}-${String(10 + i).padStart(2, "0")}-${String(20 + i).padStart(2, "0")}`,
       role: "player",
       hue: (i * 47 + 12) % 360,
+      photoURL: null,
       registeredAt: now - (300 - i * 6) * day,
       isBlocked: i === 20,
       archived: i === 25,

@@ -180,3 +180,41 @@ export function Leaderboard({ rows, db, limit = 10, dense, highlightId }: {
     </div>
   );
 }
+
+/* ---------------- сортируемые заголовки таблиц ---------------- */
+
+export type SortDir = 1 | -1;
+
+export function SortHead({ label, k, sort, onSort, align = "left", title }: {
+  label: string;
+  k: string;
+  sort: { k: string; dir: SortDir };
+  onSort: (k: string) => void;
+  align?: "left" | "center" | "right";
+  title?: string;
+}) {
+  const active = sort.k === k;
+  return (
+    <button
+      onClick={() => onSort(k)}
+      title={title ?? `Сортировать: ${label}`}
+      className={cx(
+        "group inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+        align === "center" && "justify-center",
+        align === "right" && "justify-end",
+        active ? "text-gold-300" : "text-ink-400 hover:text-cream-100",
+      )}
+    >
+      {label}
+      <span className={cx("font-mono text-[9px] leading-none transition-opacity", active ? "opacity-100" : "opacity-0 group-hover:opacity-50")}>
+        {active && sort.dir === -1 ? "▼" : "▲"}
+      </span>
+    </button>
+  );
+}
+
+/** Универсальный переключатель направления сортировки. */
+export function nextSort(sort: { k: string; dir: SortDir }, k: string): { k: string; dir: SortDir } {
+  if (sort.k !== k) return { k, dir: -1 };
+  return { k, dir: sort.dir === -1 ? 1 : -1 };
+}

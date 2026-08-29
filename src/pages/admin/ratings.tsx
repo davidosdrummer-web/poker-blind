@@ -7,12 +7,36 @@ import { PageHeader } from "../../components/shared";
 
 export default function RatingsPage() {
   const db = useDB();
-  const activeSeason = db.seasons.find((s) => s.isActive);
   const [scope, setScope] = useState<string>("global");
+  const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: "points", dir: -1 });
 
   const seasonId = scope === "global" ? null : scope;
   const board = useMemo(() => computeBoard(db, seasonId), [db, seasonId]);
   const scopeName = scope === "global" ? "Глобальный рейтинг" : db.seasons.find((s) => s.id === scope)?.name ?? "Сезон";
+
+  const nickOf = (userId: string) => db.users.find((x) => x.id === userId)?.nickname ?? "";
+  const sorted = useMemo(() => {
+    const arr = [...board];
+    const { k, dir } = sort;
+    arr.sort((a, b) => {
+      let va: number | string = 0;
+      let vb: number | string = 0;
+      if (k === "nick") { va = nickOf(a.userId).toLowerCase(); vb = nickOf(b.userId).toLowerCase(); }
+      else if (k === "name") {
+        const ua = db.users.find((x) => x.id === a.userId);
+        const ub = db.users.find((x) => x.id === b.userId);
+        va = ua ? fullName(ua).toLowerCase() : "";
+        vb = ub ? fullName(ub).toLowerCase() : "";
+      } else {
+        va = (a as unknown as Record<string, number>)[k] ?? 0;
+        vb = (b as unknown as Record<string, number>)[k] ?? 0;
+      }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return b.points - a.points;
+    });
+    return arr;
+  }, [board, sort, db.users]);
 
   const exportCsv = () => {
     const head = "Место;Никнейм;Имя Фамилия;Очки;Игр;Побед;Топ-3;Финалок;Лучший;Выбил;Докупов";
@@ -82,18 +106,18 @@ export default function RatingsPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-sm">
               <thead>
-                <tr className="border-b border-ink-700 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-                  <th className="px-4 py-2.5 text-center">Место</th>
-                  <th className="px-3 py-2.5">Никнейм</th>
-                  <th className="px-3 py-2.5">Имя Фамилия</th>
-                  <th className="px-3 py-2.5 text-right">Очки</th>
-                  <th className="px-3 py-2.5 text-center">Игр</th>
-                  <th className="px-3 py-2.5 text-center">Побед</th>
-                  <th className="px-3 py-2.5 text-center">Топ-3</th>
-                  <th className="px-3 py-2.5 text-center">Финалок</th>
-                  <th className="px-3 py-2.5 text-right" title="Лучший результат очков за один турнир">Лучший</th>
-                  <th className="px-3 py-2.5 text-center" title="Сколько игроков выбил">Выбил</th>
-                  <th className="px-4 py-2.5 text-center" title="Сколько раз делал докупы (возвращения)">Докупов</th>
+                <tr className="border-b border-ink-700 text-left">
+                  <th className="px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wider text-ink-400">Место</th>
+                  <th className="px-3 py-2.5"><SortHead label="Никнейм" k="nick" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} /></th>
+                  <th className="px-3 py-2.5"><SortHead label="Имя Фамилия" k="name" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} /></th>
+                  <th className="px-3 py-2.5 text-right"><SortHead label="Очки" k="points" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="right" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Игр" k="events" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Побед" k="wins" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Топ-3" k="top3" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Финалок" k="finalTables" sort={sort} onSort={(k) => setSort(nextSort(nextSort(sort, k), k))} align="center" /></th>
+                  <th className="px-3 py-2.5 text-right"><SortHead label="Лучший" k="bestPoints" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="right" title="Лучший результат очков за один турнир" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Выбил" k="knockouts" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" title="Сколько игроков выбил" /></th>
+                  <th className="px-4 py-2.5 text-center"><SortHead label="Докупов" k="returns" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" title="Сколько раз делал докупы (возвращения)" /></th>
                 </tr>
               </thead>
               <tbody>

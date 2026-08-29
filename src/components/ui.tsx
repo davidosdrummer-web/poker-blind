@@ -231,12 +231,12 @@ export function Ring({ ratio, size = 200, stroke = 10, critical, children }: {
 
 /* ---------------- Avatar ---------------- */
 
-export function Avatar({ name, hue, size = 32, online, className }: {
-  name: string; hue: number; size?: number; online?: boolean | null; className?: string;
+export function Avatar({ name, hue, size = 32, online, photo, className }: {
+  name: string; hue: number; size?: number; online?: boolean | null; photo?: string | null; className?: string;
 }) {
   const initials = name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
   return (
-    <span className={cx("relative inline-flex shrink-0 items-center justify-center rounded-full font-display font-bold", className)}
+    <span className={cx("relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-display font-bold", className)}
       style={{
         width: size, height: size,
         fontSize: Math.max(10, size * 0.36),
@@ -245,7 +245,9 @@ export function Avatar({ name, hue, size = 32, online, className }: {
         border: `1.5px solid hsl(${hue} 45% 38%)`,
       }}
     >
-      {initials || "?"}
+      {photo
+        ? <img src={photo} alt={name} className="h-full w-full object-cover" />
+        : (initials || "?")}
       {online && (
         <span className="absolute -bottom-0.5 -right-0.5 block rounded-full border-2 border-ink-900 bg-felt-300" style={{ width: size * 0.32, height: size * 0.32 }} />
       )}
@@ -253,10 +255,33 @@ export function Avatar({ name, hue, size = 32, online, className }: {
   );
 }
 
+/** Читает изображение, обрезает по центру и даунскейлит до 128px (dataURL для БД). */
+export function readAvatarFile(file: File, cb: (dataUrl: string) => void): string | null {
+  if (!file.type.startsWith("image/")) return "Выберите файл изображения (JPG/PNG)";
+  if (file.size > 4 * 1024 * 1024) return "Файл больше 4 МБ — возьмите фото поменьше";
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const size = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { URL.revokeObjectURL(url); return; }
+    const min = Math.min(img.width, img.height);
+    ctx.drawImage(img, (img.width - min) / 2, (img.height - min) / 2, min, min, 0, 0, size, size);
+    URL.revokeObjectURL(url);
+    cb(canvas.toDataURL("image/jpeg", 0.82));
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
+  img.src = url;
+  return null;
+}
+
 export function UserChip({ user, online, sub }: { user: User; online?: boolean | null; sub?: string }) {
   return (
     <span className="inline-flex items-center gap-2.5">
-      <Avatar name={fullName(user)} hue={user.hue} size={30} online={online} />
+      <Avatar name={fullName(user)} hue={user.hue} size={30} online={online} photo={user.photoURL} />
       <span className="leading-tight">
         <span className="block text-sm font-semibold text-cream-100">{user.nickname}</span>
         <span className="block text-[11px] text-ink-400">{sub ?? fullName(user)}</span>
