@@ -34,7 +34,7 @@ export default function ConsolePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       setRefreshKey(prev => prev + 1);
-    }, 3000);
+    }, 1000); // Обновляем каждую секунду для точного таймера
     return () => clearInterval(interval);
   }, []);
 
@@ -101,8 +101,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
     if (t.status === "active" && t.levelStartedAt != null) {
       const remaining = levelRemainingMs(t, now);
-      // Проверяем, что время вышло и есть следующий уровень
-      if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
+      // Проверяем, что время вышло (с небольшим запасом в 100мс для стабильности) и есть следующий уровень
+      if (remaining <= 100 && t.currentLevel < t.levels.length - 1) {
         console.log('🔵 Автоматическое повышение уровня...', { 
           currentLevel: t.currentLevel, 
           remaining,
@@ -125,19 +125,24 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
             console.error("Ошибка при повышении уровня:", e);
             toast("Ошибка авто-перехода", "err");
           } finally {
-            // Снимаем блокировку через 2 секунды
-            setTimeout(() => { (window as any).isTransitioning = false; }, 2000);
+            // Снимаем блокировку через 3 секунды
+            setTimeout(() => { (window as any).isTransitioning = false; }, 3000);
           }
         })();
       }
     }
     
+    // Автоматический выход с перерыва
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
-      console.log('🔵 Автоматический выход с перерыва...');
+      console.log('🔵 Автоматический выход с перерыва...', { breakEndsAt: t.breakEndsAt, now });
       (async () => {
-        await actions.endBreak(t.id);
-        toast("Перерыв завершён — игра продолжается", "info");
-        onRefresh();
+        try {
+          await actions.endBreak(t.id);
+          toast("Перерыв завершён — игра продолжается", "info");
+          onRefresh();
+        } catch (e) {
+          console.error("Ошибка при выходе с перерыва:", e);
+        }
       })();
     }
   }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
