@@ -1,44 +1,78 @@
-```gitignore
-# Dependencies
-node_modules/
-.pnpm-store/
-.yarn/
-yarn.lock
-package-lock.json
-
-# Build outputs
+```
+# Build artifacts
 dist/
 build/
-.next/
-.nuxt/
-out/
-public/build/
+*.js
 
-# TypeScript/JavaScript
-*.tsbuildinfo
-*.js.map
-*.ts.map
+# Dependencies
+node_modules/
 
-# Environment variables
+# Cache and temporary files
+*.tmp
+*.log
+
+# Environment
 .env
 .env.local
 .env.*
-!.env.example
 
-# IDE files
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# OS files
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+
+# System files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# Coverage
+# Testing and coverage
+.coverage
 coverage/
-.nyc_output/
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
+
+# Virtual environments
+.venv/
+venv/
 ```

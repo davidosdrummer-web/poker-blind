@@ -552,21 +552,21 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       
       {/* Выбивание */}
       <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание" preventClose={true}>
-        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="space-y-4">
           <Field label="Кто выбыл">
-            <Select value={koVictim} onChange={(e) => { e.stopPropagation(); setKoVictim(e.target.value); }}>
+            <Select value={koVictim} onChange={(e) => setKoVictim(e.target.value)}>
               {seated.map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
           <Field label="Кто выбил" hint="для баунти — очки киллеру">
-            <Select value={koKiller} onChange={(e) => { e.stopPropagation(); setKoKiller(e.target.value); }}>
+            <Select value={koKiller} onChange={(e) => setKoKiller(e.target.value)}>
               <option value="">Блайнды / не указано</option>
               {seated.filter((u) => u !== koVictim).map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
           <Button
             variant="danger" className="w-full" size="lg"
-            onClick={(e) => { e.stopPropagation(); handleEliminate(); }}
+            onClick={handleEliminate}
             disabled={isProcessing}
           >
             <CrosshairIcon size={15} /> {isProcessing ? "Обработка..." : "Подтвердить выбывание"}
@@ -576,9 +576,9 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
       {/* Бонус */}
       <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус" preventClose={true}>
-        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="space-y-4">
           <Field label="Игрок">
-            <Select value={bnUser} onChange={(e) => { e.stopPropagation(); setBnUser(e.target.value); }}>
+            <Select value={bnUser} onChange={(e) => setBnUser(e.target.value)}>
               {seated.map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
@@ -589,7 +589,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 {t.bonusDefs.map((b) => (
                   <button
                     key={b.name}
-                    onClick={(e) => { e.stopPropagation(); setBnName(b.name); setBnChips(b.chips); }}
+                    onClick={() => { setBnName(b.name); setBnChips(b.chips); }}
                     className={cx(
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-all",
                       bnName === b.name ? "border-gold-500/70 bg-gold-500/15 text-gold-200" : "border-ink-600 text-ink-300 hover:border-gold-500/50",
@@ -603,15 +603,15 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
           )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Наименование">
-              <Input value={bnName} onChange={(e) => { e.stopPropagation(); setBnName(e.target.value); }} placeholder="Чип-бонус" />
+              <Input value={bnName} onChange={(e) => setBnName(e.target.value)} placeholder="Чип-бонус" />
             </Field>
             <Field label="Фишек">
-              <Input type="number" value={bnChips} onChange={(e) => { e.stopPropagation(); setBnChips(Number(e.target.value) || 0); }} className="font-mono" />
+              <Input type="number" value={bnChips} onChange={(e) => setBnChips(Number(e.target.value) || 0)} className="font-mono" />
             </Field>
           </div>
           <Button
             className="w-full" size="lg"
-            onClick={(e) => { e.stopPropagation(); handleAddBonus(); }}
+            onClick={handleAddBonus}
             disabled={isProcessing}
           >
             <Gift size={15} /> {isProcessing ? "Обработка..." : "Выдать бонус"}
@@ -621,7 +621,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
       {/* Завершение */}
       <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?" preventClose={true}>
-        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="space-y-4">
           <p className="text-sm leading-relaxed text-ink-300">
             Места будут присвоены автоматически: оставшиеся игроки — по порядку чекина, выбывшие — в обратном порядке вылета.
             Очки по сетке, статистика и достижения рассчитаются мгновенно.
@@ -630,11 +630,11 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
             В игре: <b className="font-mono text-gold-300">{remaining}</b> · выбыло: <b className="font-mono">{t.knockouts?.length || 0}</b> · в зачёте: <b className="font-mono">{remaining + (t.knockouts?.length || 0)}</b>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={(e) => { e.stopPropagation(); setModal(""); }}>Отмена</Button>
+            <Button variant="outline" className="flex-1" onClick={() => setModal("")}>Отмена</Button>
             <Button
               variant="danger"
               className="flex-1"
-              onClick={(e) => { e.stopPropagation(); handleFinishTournament(); }}
+              onClick={handleFinishTournament}
               disabled={isFinishing}
             >
               <Flag size={15} /> {isFinishing ? "Завершение..." : "Опубликовать итоги"}

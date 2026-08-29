@@ -138,11 +138,14 @@ export function Modal({ open, onClose, title, children, width = "max-w-md", prev
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-ink-950/80 backdrop-blur-sm" onClick={preventClose ? undefined : onClose} />
-      <div className={cx("animate-pop relative w-full rounded-xl border border-ink-600 bg-ink-850 p-5 shadow-2xl", width)}>
+      <div 
+        className={cx("animate-pop relative w-full rounded-xl border border-ink-600 bg-ink-850 p-5 shadow-2xl", width)}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mb-4 flex items-center justify-between gap-4">
           <h3 className="font-display text-base font-bold text-cream-100">{title}</h3>
           {!preventClose && (
-            <button onClick={onClose} className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-ink-700 hover:text-cream-100" aria-label="Закрыть">
+            <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-ink-700 hover:text-cream-100" aria-label="Закрыть">
               <X size={16} />
             </button>
           )}
