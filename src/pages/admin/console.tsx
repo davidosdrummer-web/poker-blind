@@ -92,29 +92,58 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
   const eliminated = useMemo(() => [...t.knockouts].reverse(), [t.knockouts]);
   const nick = (uidv: string | null) => (uidv ? db.users.find((u) => u.id === uidv)?.nickname ?? "—" : "блайнды");
 
-  // Автоматическое повышение блайндов
+  // ============================================================
+  //  ИСПРАВЛЕННЫЙ useEffect для автоматического переключения уровней
+  // ============================================================
   useEffect(() => {
+    // Автоматическое повышение блайндов
     if (t.status === "active" && t.levelStartedAt != null) {
       const remaining = levelRemainingMs(t, now);
       if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
-        console.log('🔵 Автоматическое повышение уровня...');
-        const err = actions.nextLevel(t.id);
-        if (err) {
-          toast(err, "err");
-        } else {
-          toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
-          onRefresh();
-        }
+        console.log('🔵 Автоматическое повышение уровня...', { 
+          currentLevel: t.currentLevel, 
+          remaining, 
+          now, 
+          levelStartedAt: t.levelStartedAt,
+          levelsCount: t.levels.length 
+        });
+        
+        const doNextLevel = async () => {
+          try {
+            const err = await actions.nextLevel(t.id);
+            if (err) {
+              console.error('❌ Ошибка nextLevel:', err);
+              toast(err, "err");
+            } else {
+              const newLevel = t.currentLevel + 1;
+              toast(`Уровень ${newLevel + 1} — блайнды повышены`, "info");
+              onRefresh();
+            }
+          } catch (error) {
+            console.error('❌ Исключение в nextLevel:', error);
+            toast("Ошибка при повышении уровня", "err");
+          }
+        };
+        doNextLevel();
       }
     }
     
+    // Автоматический выход с перерыва
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
       console.log('🔵 Автоматический выход с перерыва...');
-      actions.endBreak(t.id);
-      toast("Перерыв завершён — игра продолжается", "info");
-      onRefresh();
+      const doEndBreak = async () => {
+        try {
+          await actions.endBreak(t.id);
+          toast("Перерыв завершён — игра продолжается", "info");
+          onRefresh();
+        } catch (error) {
+          console.error('❌ Ошибка выхода с перерыва:', error);
+          toast("Ошибка при выходе с перерыва", "err");
+        }
+      };
+      doEndBreak();
     }
-  }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
+  }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length, onRefresh]);
 
   const togglePause = async () => {
     if (isProcessing) return;
@@ -541,8 +570,6 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
         </div>
       </div>
 
-      {/* Модальные окна */}
-      
       {/* Выбивание */}
       <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание">
         <div className="space-y-4">
