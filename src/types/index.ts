@@ -13,7 +13,7 @@ export type SeatAlgo = "random" | "rating" | "balanced";
 export type RebuyKind = "rebuy" | "addon" | "reentry" | "lastchance";
 
 export interface BlindLevel { sb: number; bb: number; ante: number; duration: number; }
-export interface BreakRule { afterLevel: number; duration: number; }
+export interface BreakRule { afterLevel: number; duration: number; } // перерыв ПОСЛЕ уровня afterLevel (0-based индекс)
 
 export interface ScoringGridRow { place: number; points: number; }
 export interface ScoringConfig {

@@ -1,5 +1,5 @@
 // src/pages/admin/console.tsx
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Coffee, ExternalLink, Flag, Gift, Minus, MonitorPlay,
@@ -34,7 +34,7 @@ export default function ConsolePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       setRefreshKey(prev => prev + 1);
-    }, 3000);
+    }, 1000); // Обновляем каждую секунду для точного таймера
     return () => clearInterval(interval);
   }, []);
 
@@ -80,6 +80,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
   const [breakMin, setBreakMin] = useState(15);
   const [modal, setModal] = useState<"" | "ko" | "bonus" | "finish">("");
+  const modalRef = useRef(modal);
+  modalRef.current = modal;
   const [koVictim, setKoVictim] = useState("");
   const [koKiller, setKoKiller] = useState("");
   const [bnUser, setBnUser] = useState("");
@@ -94,25 +96,54 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
   // Автоматическое повышение блайндов
   useEffect(() => {
+    // Защита от множественных вызовов
+    if ((window as any).isTransitioning) return;
+
     if (t.status === "active" && t.levelStartedAt != null) {
       const remaining = levelRemainingMs(t, now);
-      if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
-        console.log('🔵 Автоматическое повышение уровня...');
-        const err = actions.nextLevel(t.id);
-        if (err) {
-          toast(err, "err");
-        } else {
-          toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
-          onRefresh();
-        }
+      // Проверяем, что время вышло (с небольшим запасом в 100мс для стабильности) и есть следующий уровень
+      if (remaining <= 100 && t.currentLevel < t.levels.length - 1) {
+        console.log('🔵 Автоматическое повышение уровня...', { 
+          currentLevel: t.currentLevel, 
+          remaining,
+          now,
+          levelStartedAt: t.levelStartedAt 
+        });
+        
+        (window as any).isTransitioning = true;
+        
+        (async () => {
+          try {
+            const err = await actions.nextLevel(t.id);
+            if (err) {
+              toast(err, "err");
+            } else {
+              toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
+              onRefresh();
+            }
+          } catch (e) {
+            console.error("Ошибка при повышении уровня:", e);
+            toast("Ошибка авто-перехода", "err");
+          } finally {
+            // Снимаем блокировку через 3 секунды
+            setTimeout(() => { (window as any).isTransitioning = false; }, 3000);
+          }
+        })();
       }
     }
     
+    // Автоматический выход с перерыва
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
-      console.log('🔵 Автоматический выход с перерыва...');
-      actions.endBreak(t.id);
-      toast("Перерыв завершён — игра продолжается", "info");
-      onRefresh();
+      console.log('🔵 Автоматический выход с перерыва...', { breakEndsAt: t.breakEndsAt, now });
+      (async () => {
+        try {
+          await actions.endBreak(t.id);
+          toast("Перерыв завершён — игра продолжается", "info");
+          onRefresh();
+        } catch (e) {
+          console.error("Ошибка при выходе с перерыва:", e);
+        }
+      })();
     }
   }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
 
@@ -137,16 +168,17 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
   };
 
   useHotkeys({
-    " ": togglePause,
-    n: () => { 
-      const err = actions.nextLevel(t.id); 
+    " ": () => { if (modalRef.current === "") togglePause(); },
+    n: async () => { 
+      if (modalRef.current !== "") return;
+      const err = await actions.nextLevel(t.id); 
       if (err) toast(err, "err"); 
       else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
     },
-    p: () => { actions.prevLevel(t.id); onRefresh(); },
-    b: () => { 
-      if (t.status === "active") { 
-        actions.startBreak(t.id, breakMin); 
+    p: async () => { if (modalRef.current === "") { await actions.prevLevel(t.id); onRefresh(); } },
+    b: async () => { 
+      if (modalRef.current === "" && t.status === "active") { 
+        await actions.startBreak(t.id, breakMin); 
         toast(`Перерыв ${breakMin} мин`, "info"); 
         onRefresh();
       } 
@@ -270,16 +302,16 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
               ? <>поздняя регистрация: <b className="tabular font-mono text-gold-300">{fmtClock(lateRem / 1000)}</b></>
               : "поздняя регистрация закрыта"}
           </span>
-          <button onClick={() => { 
-            actions.adjustLateReg(t.id, 15); 
+          <button onClick={async () => { 
+            await actions.adjustLateReg(t.id, 15); 
             toast("Поздняя регистрация +15 мин", "info"); 
             onRefresh();
           }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-gold-500 hover:text-ink-950">
             +15 мин
           </button>
           {lateOpen && (
-            <button onClick={() => { 
-              actions.adjustLateReg(t.id, -99999); 
+            <button onClick={async () => { 
+              await actions.adjustLateReg(t.id, -99999); 
               toast("Поздняя регистрация закрыта", "info"); 
               onRefresh();
             }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-danger-500">
@@ -326,8 +358,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
             <div className="mt-5 grid w-full grid-cols-2 gap-2">
               {isBreak ? (
-                <Button variant="felt" onClick={() => { 
-                  actions.endBreak(t.id); 
+                <Button variant="felt" onClick={async () => { 
+                  await actions.endBreak(t.id); 
                   toast("Перерыв завершён", "ok"); 
                   onRefresh();
                 }}>
@@ -342,33 +374,33 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 <Select value={String(breakMin)} onChange={(e) => setBreakMin(Number(e.target.value))} className="w-[76px] px-2 text-xs">
                   {[10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} мин</option>)}
                 </Select>
-                <Button variant="outline" className="flex-1" disabled={isBreak || isProcessing} onClick={() => { 
-                  actions.startBreak(t.id, breakMin); 
+                <Button variant="outline" className="flex-1" disabled={isBreak || isProcessing} onClick={async () => { 
+                  await actions.startBreak(t.id, breakMin); 
                   toast(`Перерыв ${breakMin} мин`, "info"); 
                   onRefresh();
                 }}>
                   <Coffee size={14} /> Перерыв
                 </Button>
               </div>
-              <Button variant="dark" disabled={t.currentLevel === 0} onClick={() => { actions.prevLevel(t.id); onRefresh(); }}>
+              <Button variant="dark" disabled={t.currentLevel === 0} onClick={async () => { await actions.prevLevel(t.id); onRefresh(); }}>
                 <ArrowLeft size={14} /> Пред. уровень
               </Button>
-              <Button variant="dark" onClick={() => { 
-                const err = actions.nextLevel(t.id); 
+              <Button variant="dark" onClick={async () => { 
+                const err = await actions.nextLevel(t.id); 
                 if (err) toast(err, "err"); 
                 else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
               }}>
                 След. уровень <ArrowRight size={14} />
               </Button>
-              <Button variant="outline" onClick={() => { 
-                actions.adjustTimer(t.id, -60); 
+              <Button variant="outline" onClick={async () => { 
+                await actions.adjustTimer(t.id, -60); 
                 toast("−1 минута", "info"); 
                 onRefresh();
               }}>
                 <Minus size={14} /> 1 мин
               </Button>
-              <Button variant="outline" onClick={() => { 
-                actions.adjustTimer(t.id, 60); 
+              <Button variant="outline" onClick={async () => { 
+                await actions.adjustTimer(t.id, 60); 
                 toast("+1 минута", "info"); 
                 onRefresh();
               }}>
@@ -415,12 +447,12 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 return (
                   <div key={idx}>
                     <button
-                      onClick={() => { 
+                      onClick={async () => { 
                         while (idx > t.currentLevel) { 
-                          const err = actions.nextLevel(t.id); 
+                          const err = await actions.nextLevel(t.id); 
                           if (err) break; 
                         } 
-                        while (idx < t.currentLevel) actions.prevLevel(t.id); 
+                        while (idx < t.currentLevel) await actions.prevLevel(t.id); 
                         onRefresh();
                       }}
                       className={cx(
@@ -544,22 +576,22 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       {/* Модальные окна */}
       
       {/* Выбивание */}
-      <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание">
-        <div className="space-y-4">
+      <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание" preventClose={true}>
+        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
           <Field label="Кто выбыл">
-            <Select value={koVictim} onChange={(e) => setKoVictim(e.target.value)}>
+            <Select value={koVictim} onChange={(e) => { e.stopPropagation(); setKoVictim(e.target.value); }} onClick={(e) => e.stopPropagation()}>
               {seated.map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
           <Field label="Кто выбил" hint="для баунти — очки киллеру">
-            <Select value={koKiller} onChange={(e) => setKoKiller(e.target.value)}>
+            <Select value={koKiller} onChange={(e) => { e.stopPropagation(); setKoKiller(e.target.value); }} onClick={(e) => e.stopPropagation()}>
               <option value="">Блайнды / не указано</option>
               {seated.filter((u) => u !== koVictim).map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
           <Button
             variant="danger" className="w-full" size="lg"
-            onClick={handleEliminate}
+            onClick={(e) => { e.stopPropagation(); handleEliminate(); }}
             disabled={isProcessing}
           >
             <CrosshairIcon size={15} /> {isProcessing ? "Обработка..." : "Подтвердить выбывание"}
@@ -568,10 +600,10 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       </Modal>
 
       {/* Бонус */}
-      <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус">
-        <div className="space-y-4">
+      <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус" preventClose={true}>
+        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
           <Field label="Игрок">
-            <Select value={bnUser} onChange={(e) => setBnUser(e.target.value)}>
+            <Select value={bnUser} onChange={(e) => { e.stopPropagation(); setBnUser(e.target.value); }} onClick={(e) => e.stopPropagation()}>
               {seated.map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
@@ -582,7 +614,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 {t.bonusDefs.map((b) => (
                   <button
                     key={b.name}
-                    onClick={() => { setBnName(b.name); setBnChips(b.chips); }}
+                    onClick={(e) => { e.stopPropagation(); setBnName(b.name); setBnChips(b.chips); }}
                     className={cx(
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-all",
                       bnName === b.name ? "border-gold-500/70 bg-gold-500/15 text-gold-200" : "border-ink-600 text-ink-300 hover:border-gold-500/50",
@@ -596,15 +628,15 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
           )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Наименование">
-              <Input value={bnName} onChange={(e) => setBnName(e.target.value)} placeholder="Чип-бонус" />
+              <Input value={bnName} onChange={(e) => { e.stopPropagation(); setBnName(e.target.value); }} onClick={(e) => e.stopPropagation()} placeholder="Чип-бонус" />
             </Field>
             <Field label="Фишек">
-              <Input type="number" value={bnChips} onChange={(e) => setBnChips(Number(e.target.value) || 0)} className="font-mono" />
+              <Input type="number" value={bnChips} onChange={(e) => { e.stopPropagation(); setBnChips(Number(e.target.value) || 0); }} onClick={(e) => e.stopPropagation()} className="font-mono" />
             </Field>
           </div>
           <Button
             className="w-full" size="lg"
-            onClick={handleAddBonus}
+            onClick={(e) => { e.stopPropagation(); handleAddBonus(); }}
             disabled={isProcessing}
           >
             <Gift size={15} /> {isProcessing ? "Обработка..." : "Выдать бонус"}
@@ -613,8 +645,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       </Modal>
 
       {/* Завершение */}
-      <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?">
-        <div className="space-y-4">
+      <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?" preventClose={true}>
+        <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
           <p className="text-sm leading-relaxed text-ink-300">
             Места будут присвоены автоматически: оставшиеся игроки — по порядку чекина, выбывшие — в обратном порядке вылета.
             Очки по сетке, статистика и достижения рассчитаются мгновенно.
@@ -623,11 +655,11 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
             В игре: <b className="font-mono text-gold-300">{remaining}</b> · выбыло: <b className="font-mono">{t.knockouts?.length || 0}</b> · в зачёте: <b className="font-mono">{remaining + (t.knockouts?.length || 0)}</b>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setModal("")}>Отмена</Button>
+            <Button variant="outline" className="flex-1" onClick={(e) => { e.stopPropagation(); setModal(""); }}>Отмена</Button>
             <Button
               variant="danger"
               className="flex-1"
-              onClick={handleFinishTournament}
+              onClick={(e) => { e.stopPropagation(); handleFinishTournament(); }}
               disabled={isFinishing}
             >
               <Flag size={15} /> {isFinishing ? "Завершение..." : "Опубликовать итоги"}

@@ -1,5 +1,11 @@
+```
+# Dependencies
 node_modules/
-.next/
+
+# Build artifacts
 dist/
 build/
-*.log
+
+# Temporary files
+*.tmp
+```

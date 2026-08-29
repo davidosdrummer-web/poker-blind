@@ -802,7 +802,9 @@ export const actions = {
     const newLevel = t.currentLevel + 1;
     const now = Date.now();
 
-    const br = t.breaks.find((b) => b.afterLevel === newLevel);
+    // Проверяем, есть ли перерыв ПОСЛЕ текущего уровня (перед переходом на новый)
+    // afterLevel — это индекс уровня (0-based), после которого должен быть перерыв
+    const br = t.breaks.find((b) => b.afterLevel === t.currentLevel);
 
     const updateData: any = {
       currentLevel: newLevel,
@@ -1316,8 +1318,8 @@ export const actions = {
         { sb: 2000, bb: 4000, ante: 500, duration: 15 },
       ],
       breaks: [
-        { afterLevel: 3, duration: 20 },
-        { afterLevel: 6, duration: 20 },
+        { afterLevel: 2, duration: 20 }, // перерыв после уровня 3 (индекс 2)
+        { afterLevel: 5, duration: 20 }, // перерыв после уровня 6 (индекс 5)
       ],
       rebuyAllowed: false,
       maxRebuys: 0,
