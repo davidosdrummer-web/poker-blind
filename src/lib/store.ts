@@ -802,7 +802,8 @@ export const actions = {
     const newLevel = t.currentLevel + 1;
     const now = Date.now();
 
-    const br = t.breaks.find((b) => b.afterLevel === newLevel);
+    // Проверяем, есть ли перерыв ПОСЛЕ текущего уровня (перед переходом на новый)
+    const br = t.breaks.find((b) => b.afterLevel === t.currentLevel);
 
     const updateData: any = {
       currentLevel: newLevel,
