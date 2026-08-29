@@ -1,7 +1,7 @@
 import type {
   BlindLevel, DB, ResultEntry, ScoringConfig, Season, TableState, Template, Tournament, User, UserStats,
 } from "../types";
-import { defaultGrid, defaultScoring, scoreForPlace } from "./formulas";
+import { DEFAULT_ACHIEVEMENTS, defaultGrid, defaultScoring, scoreForPlace } from "./formulas";
 
 /** конфигурация столов по умолчанию: по 9 мест */
 function defaultTables(maxPlayers: number): TableState[] {
@@ -73,13 +73,13 @@ function buildUsers(): User[] {
     {
       id: "u_admin", email: "admin@tuz.club", password: "poker123",
       firstName: "Виктор", lastName: "Орлов", nickname: "Директор", phone: "+7 916 000-00-01",
-      role: "admin", hue: 43, photoURL: null, registeredAt: now - 400 * day, isBlocked: false, archived: false, manualPoints: 0,
+      role: "admin", hue: 43, photoURL: null, cover: 1, registeredAt: now - 400 * day, isBlocked: false, archived: false, manualPoints: 0,
       stats: genStats(3), achievements: ["ach_first"],
     },
     {
       id: "u_op", email: "op@tuz.club", password: "poker123",
       firstName: "Марина", lastName: "Соколова", nickname: "Крупье", phone: "+7 916 000-00-02",
-      role: "operator", hue: 160, photoURL: null, registeredAt: now - 350 * day, isBlocked: false, archived: false, manualPoints: 0,
+      role: "operator", hue: 160, photoURL: null, cover: 3, registeredAt: now - 350 * day, isBlocked: false, archived: false, manualPoints: 0,
       stats: genStats(6), achievements: ["ach_first"],
     },
   ];
@@ -98,6 +98,7 @@ function buildUsers(): User[] {
       role: "player",
       hue: (i * 47 + 12) % 360,
       photoURL: null,
+      cover: i % 6,
       registeredAt: now - (300 - i * 6) * day,
       isBlocked: i === 20,
       archived: i === 25,
@@ -319,6 +320,7 @@ export function buildSeed(): DB {
   return {
     v: 5,
     users: buildUsers(),
+    achievements: JSON.parse(JSON.stringify(DEFAULT_ACHIEVEMENTS)),
     seasons: buildSeasons(),
     templates: buildTemplates(),
     tournaments: buildTournaments(),
@@ -338,6 +340,9 @@ export function buildSeed(): DB {
       tagline: "Спортивный покер-клуб · турниры, рейтинги, сезоны",
       language: "ru",
       primary: "#d4a017",
+      background: "#0a0a12",
+      soundsEnabled: true,
+      soundVolume: 70,
       defaultScoring: defaultScoring(),
     },
     presence: Object.fromEntries(

@@ -187,7 +187,7 @@ export function Bar({ value, max, tone = "gold" }: { value: number; max: number;
   );
 }
 
-export function Stat({ label, value, icon, tone = "ink" }: { label: string; value: ReactNode; icon?: ReactNode; tone?: "ink" | "gold" | "felt" | "danger" }) {
+export function Stat({ label, value, icon, tone = "ink", hint }: { label: string; value: ReactNode; icon?: ReactNode; tone?: "ink" | "gold" | "felt" | "danger"; hint?: string }) {
   const t = {
     ink: "text-cream-100",
     gold: "text-gold-300",
@@ -195,11 +195,12 @@ export function Stat({ label, value, icon, tone = "ink" }: { label: string; valu
     danger: "text-danger-300",
   }[tone];
   return (
-    <div className="rounded-xl border border-ink-700 bg-ink-850/85 px-4 py-3">
+    <div className="rounded-xl border border-ink-700 bg-ink-850/85 px-4 py-3" title={hint}>
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">
         {icon}{label}
       </div>
       <div className={cx("tabular mt-1 font-mono text-2xl font-bold", t)}>{value}</div>
+      {hint && <div className="mt-1 text-[10px] leading-snug text-ink-500">{hint}</div>}
     </div>
   );
 }
@@ -228,6 +229,17 @@ export function Ring({ ratio, size = 200, stroke = 10, critical, children }: {
     </div>
   );
 }
+
+/* ---------------- пресеты обложек профиля ---------------- */
+
+export const COVER_PRESETS = [
+  "linear-gradient(120deg,#175e3e,#09281b)",  // сукно
+  "linear-gradient(120deg,#5f4607,#131322)",  // золотая ночь
+  "linear-gradient(120deg,#5a1f1f,#131322)",  // бордо
+  "linear-gradient(120deg,#14324a,#0a0a12)",  // navy
+  "linear-gradient(120deg,#3d3d58,#131322)",  // графит
+  "linear-gradient(120deg,#7a4a12,#241405)",  // виски
+];
 
 /* ---------------- Avatar ---------------- */
 

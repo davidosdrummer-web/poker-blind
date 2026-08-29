@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  Award, BarChart3, Bell, CalendarDays, CheckCircle2, LogOut, Moon, Sun, Trophy as TrophyLucide, UserRound, XCircle,
+  Award, BarChart3, Bell, CalendarDays, Camera, CheckCircle2, LogOut, Moon, Sun, Trophy as TrophyLucide, UserRound, XCircle,
 } from "lucide-react";
 import { actions, unreadCount } from "../lib/store";
 import { useAuth, useDB, usePresenceHeartbeat } from "../lib/hooks";
 import type { DB, User } from "../types";
-import { computeBoard, cx, fmtDateTime, fmtNum, fullName, itmRate, timeAgo } from "../lib/formulas";
-import { Avatar, Badge, Bar, Button, Card, EmptyState, Field, Input, Reveal, SectionHead, Stat, Tabs, toast } from "../components/ui";
+import { computeBoard, cx, fmtDateTime, fmtNum, fullName, timeAgo } from "../lib/formulas";
+import { Avatar, Badge, Bar, Button, Card, COVER_PRESETS, EmptyState, Field, Input, readAvatarFile, Reveal, SectionHead, Stat, Tabs, toast } from "../components/ui";
 import { Leaderboard, PageHeader, StatusBadge } from "../components/shared";
 import { Spade, SuitsRow, TrophyIcon, CrownIcon } from "../components/icons";
 import { AchievementsTab, NoticesTab, RatingsTab, StatsTab } from "./playerStats";
@@ -74,7 +74,7 @@ export default function PlayerCabinet() {
               <button onClick={toggleTheme} className="rounded-lg border border-ink-600 p-2 text-ink-300 transition-colors hover:border-gold-500/50 hover:text-gold-300" title="Сменить тему">
                 {light ? <Moon size={15} /> : <Sun size={15} />}
               </button>
-              <Avatar name={fullName(user)} hue={user.hue} size={34} online />
+              <Avatar name={fullName(user)} hue={user.hue} size={34} photo={user.photoURL} online />
               <button
                 onClick={() => { actions.logout(); toast("До встречи за столом!", "info"); navigate("/"); }}
                 className="rounded-lg border border-ink-600 p-2 text-ink-300 transition-colors hover:border-danger-500/50 hover:text-danger-300"
@@ -91,7 +91,7 @@ export default function PlayerCabinet() {
             {tab === "overview" && <OverviewTab user={user} db={db} goto={setTab} />}
             {tab === "tournaments" && <TournamentsTab user={user} db={db} />}
             {tab === "stats" && <StatsTab user={user} db={db} />}
-            {tab === "achievements" && <AchievementsTab user={user} />}
+            {tab === "achievements" && <AchievementsTab user={user} db={db} />}
             {tab === "ratings" && <RatingsTab user={user} db={db} />}
             {tab === "notices" && <NoticesTab user={user} db={db} />}
           </div>
@@ -123,19 +123,40 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
     <div className="space-y-6">
       <Reveal>
         <Card className="shine-wrap overflow-hidden">
-          <div className="felt-surface relative px-6 pb-16 pt-6">
+          <div className="relative px-6 pb-16 pt-6" style={{ background: COVER_PRESETS[user.cover ?? 0] ?? COVER_PRESETS[0] }}>
             <SuitsRow size={16} className="absolute right-5 top-5 opacity-60" />
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-felt-200/80">личный кабинет</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-cream-100/70">личный кабинет</div>
             <div className="mt-1 font-display text-2xl font-extrabold text-cream-50">
               Добро пожаловать, {user.nickname}
             </div>
           </div>
           <div className="relative -mt-10 flex flex-wrap items-end gap-5 px-6 pb-5">
-            <Avatar name={fullName(user)} hue={user.hue} size={84} online className="border-4 border-ink-850 shadow-2xl" />
+            <div className="group relative">
+              <Avatar name={fullName(user)} hue={user.hue} size={84} photo={user.photoURL} online className="border-4 border-ink-850 shadow-2xl" />
+              <label
+                className="absolute -bottom-1 -right-1 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-2 border-ink-850 bg-gold-500 text-ink-950 shadow-lg transition-transform hover:scale-110"
+                title="Загрузить фото"
+              >
+                <Camera size={14} />
+                <input
+                  type="file" accept="image/*" className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    const err = readAvatarFile(f, (url) => { actions.updateProfile(user.id, { photoURL: url }); toast("Аватар обновлён"); });
+                    if (err) toast(err, "err");
+                  }}
+                />
+              </label>
+            </div>
             <div className="min-w-0 flex-1 pt-10">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-display text-lg font-bold text-cream-100">{user.nickname}</span>
-                <Badge tone="felt" dot>в сети</Badge>
+                <Badge tone="felt" dot>в клубе</Badge>
+                <Badge tone={user.role === "admin" ? "gold" : user.role === "operator" ? "cream" : "ink"}>
+                  {user.role === "admin" ? "администратор" : user.role === "operator" ? "оператор" : "игрок"}
+                </Badge>
                 <Badge tone="ink">{user.email}</Badge>
               </div>
               <div className="text-sm text-ink-400">{fullName(user)} · в клубе с {new Date(user.registeredAt).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</div>
@@ -144,7 +165,7 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
               {[
                 { v: me?.rank ? `#${me.rank}` : "—", l: "в сезоне" },
                 { v: fmtNum(me?.points ?? 0), l: "очков" },
-                { v: `${itmRate(user.stats)}%`, l: "ITM" },
+                { v: fmtNum(user.stats.bestPoints), l: "лучший рез." },
               ].map((x) => (
                 <div key={x.l}>
                   <div className="tabular font-mono text-xl font-bold text-gold-300">{x.v}</div>

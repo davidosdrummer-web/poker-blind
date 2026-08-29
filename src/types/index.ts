@@ -55,6 +55,8 @@ export interface User {
   hue: number;
   /** загруженный аватар (dataURL) */
   photoURL: string | null;
+  /** индекс пресета обложки профиля, 0–5 */
+  cover: number;
   registeredAt: number;
   isBlocked: boolean;
   archived: boolean;
@@ -173,6 +175,12 @@ export interface ClubSettings {
   tagline: string;
   language: "ru" | "en";
   primary: string;
+  /** цвет фона интерфейса (тёмная база) */
+  background: string;
+  /** звуковое сопровождение событий турнира */
+  soundsEnabled: boolean;
+  /** громкость событий, 0–100 */
+  soundVolume: number;
   defaultScoring: ScoringConfig;
 }
 
@@ -183,6 +191,8 @@ export interface DB {
   users: User[];
   seasons: Season[];
   templates: Template[];
+  /** библиотека достижений (коллекция achievements из ТЗ) */
+  achievements: AchievementDef[];
   tournaments: Tournament[];
   displays: DisplayCfg[];
   notices: Notice[];
@@ -205,10 +215,20 @@ export interface BoardRow {
   rank: number;
 }
 
+/** Поле статистики, по которому проверяется достижение */
+export type StatKey =
+  | "tournamentsPlayed" | "wins" | "top3" | "finalTables"
+  | "knockouts" | "rebuys" | "returns" | "inMoney" | "bestPoints";
+
+/**
+ * Достижение с декларативным условием — хранится в БД,
+ * создаётся и редактируется администратором в настройках.
+ */
 export interface AchievementDef {
   id: string;
   name: string;
   description: string;
   icon: "cards" | "trophy" | "table" | "crosshair" | "shield" | "flame" | "crown" | "gem";
-  check: (s: UserStats) => boolean;
+  condition: { stat: StatKey; min: number };
+  builtIn?: boolean;
 }

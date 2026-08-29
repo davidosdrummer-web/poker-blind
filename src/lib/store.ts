@@ -1,11 +1,11 @@
 import type {
-  DB, DisplayCfg, Notice, RebuyKind, ResultEntry, Role, ScoringConfig, Season, SeatAlgo,
-  Template, Tournament, User,
+  AchievementDef, DB, DisplayCfg, Notice, RebuyKind, ResultEntry, Role, ScoringConfig, Season,
+  SeatAlgo, Template, Tournament, User,
 } from "../types";
 import { buildSeed } from "./seed";
 import {
-  computeBoard, emptyStats, freshAchievements, isLateRegOpen, itmCutoff, levelDurationMs,
-  levelRemainingMs, provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
+  computeBoard, DEFAULT_ACHIEVEMENTS, emptyStats, freshAchievements, isLateRegOpen, itmCutoff,
+  levelDurationMs, levelRemainingMs, provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
 } from "./formulas";
 
 /* ============================================================
@@ -28,12 +28,31 @@ function isValid(db: unknown): db is DB {
     && !!d.settings && !!d.presence;
 }
 
+/** Достраивает поля, появившиеся в новых версиях схемы (без потери данных). */
+function normalize(d: DB): DB {
+  if (!Array.isArray(d.achievements) || d.achievements.length === 0) {
+    d.achievements = JSON.parse(JSON.stringify(DEFAULT_ACHIEVEMENTS));
+  }
+  const s = d.settings as Partial<DB["settings"]>;
+  if (!s.background) s.background = "#0a0a12";
+  if (s.soundsEnabled === undefined) s.soundsEnabled = true;
+  if (s.soundVolume === undefined) s.soundVolume = 70;
+  for (const u of d.users) {
+    if (u.cover === undefined || u.cover === null) u.cover = 0;
+    if (u.photoURL === undefined) u.photoURL = null;
+  }
+  for (const t of d.tournaments) {
+    if ((t as unknown as Record<string, unknown>).finalTableAt === undefined) t.finalTableAt = 9;
+  }
+  return d;
+}
+
 function load(): DB {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
-      if (isValid(parsed)) return parsed;
+      if (isValid(parsed)) return normalize(parsed);
     }
   } catch { /* повреждённые данные — пересоздаём */ }
   const seed = buildSeed();
@@ -67,7 +86,7 @@ try {
         const raw = localStorage.getItem(LS_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as unknown;
-          if (isValid(parsed)) state = parsed;
+          if (isValid(parsed)) state = normalize(parsed);
         }
       } catch { /* ignore */ }
       emit();
@@ -80,7 +99,7 @@ if (typeof window !== "undefined") {
     if (e.key === LS_KEY && e.newValue) {
       try {
         const parsed = JSON.parse(e.newValue) as unknown;
-        if (isValid(parsed)) { state = parsed; emit(); }
+        if (isValid(parsed)) { state = normalize(parsed); emit(); }
       } catch { /* ignore */ }
     }
   });
@@ -219,6 +238,7 @@ export const actions = {
         firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
         nickname: opts.nickname.trim(), phone: opts.phone.trim(),
         role: "player", hue: Math.floor(Math.random() * 360), photoURL: null,
+        cover: Math.floor(Math.random() * 6),
         registeredAt: Date.now(), isBlocked: false, archived: false, manualPoints: 0,
         stats: emptyStats(), achievements: [],
       });
@@ -246,6 +266,7 @@ export const actions = {
         firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
         nickname: opts.nickname.trim(), phone: opts.phone.trim(),
         role: "player", hue: opts.hue, photoURL: opts.photoURL ?? null,
+        cover: Math.floor(Math.random() * 6),
         registeredAt: opts.registeredAt || Date.now(),
         isBlocked: false, archived: false,
         manualPoints: Math.max(0, Math.round(opts.manualPoints || 0)),
@@ -275,7 +296,7 @@ export const actions = {
     mutate((db) => touchPresence(db, userId, tournamentId));
   },
 
-  updateProfile(userId: string, patch: Partial<Pick<User, "firstName" | "lastName" | "nickname" | "phone" | "hue" | "photoURL">>): string | null {
+  updateProfile(userId: string, patch: Partial<Pick<User, "firstName" | "lastName" | "nickname" | "phone" | "hue" | "photoURL" | "cover">>): string | null {
     if (patch.nickname !== undefined && !patch.nickname.trim()) return "Никнейм не может быть пустым";
     mutate((db) => {
       const u = findUser(db, userId);
@@ -763,7 +784,7 @@ export const actions = {
         u.stats.totalPlace += r.place;
         u.stats.bestPlace = u.stats.bestPlace === 0 ? r.place : Math.min(u.stats.bestPlace, r.place);
         if (r.points > u.stats.bestPoints) u.stats.bestPoints = r.points;
-        const fresh = freshAchievements(u.stats, u.achievements);
+        const fresh = freshAchievements(u.stats, u.achievements, db.achievements);
         if (fresh.length) {
           u.achievements.push(...fresh.map((f) => f.id));
           fresh.forEach((f) => notice(db, u.id, `Новое достижение: «${f.name}»`, "win"));
@@ -852,8 +873,21 @@ export const actions = {
     mutate((db) => { Object.assign(db.settings, patch); });
   },
 
-  saveDefaultScoring(s: ScoringConfig) {
-    mutate((db) => { db.settings.defaultScoring = s; });
+  /* ---------- достижения (коллекция achievements) ---------- */
+
+  saveAchievement(def: AchievementDef): string | null {
+    if (!def.name.trim()) return "Укажите название достижения";
+    if (!def.condition || def.condition.min < 0) return "Укажите порог условия";
+    mutate((db) => {
+      const i = db.achievements.findIndex((a) => a.id === def.id);
+      if (i >= 0) db.achievements[i] = def;
+      else db.achievements.push(def);
+    });
+    return null;
+  },
+
+  deleteAchievement(id: string) {
+    mutate((db) => { db.achievements = db.achievements.filter((a) => a.id !== id); });
   },
 
   markNoticesRead(userId: string) {

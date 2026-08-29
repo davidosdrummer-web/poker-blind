@@ -1,6 +1,6 @@
 import type {
-  AchievementDef, BlindLevel, BoardRow, BreakRule, DB, RebuyKind, ScoringConfig, TableState,
-  Tournament, TournamentType, User, UserStats,
+  AchievementDef, BlindLevel, BoardRow, BreakRule, DB, RebuyKind, ScoringConfig, StatKey,
+  TableState, Tournament, TournamentType, User, UserStats,
 } from "../types";
 
 /* ---------------- утилиты ---------------- */
@@ -209,23 +209,38 @@ export function itmRate(s: UserStats): number {
   return s.tournamentsPlayed ? Math.round((s.inMoney / s.tournamentsPlayed) * 100) : 0;
 }
 
-export const ACHIEVEMENTS: AchievementDef[] = [
-  { id: "ach_first", name: "Первая раздача", description: "Сыграть первый турнир клуба", icon: "cards", check: (s) => s.tournamentsPlayed >= 1 },
-  { id: "ach_win", name: "Первая победа", description: "Занять 1-е место", icon: "trophy", check: (s) => s.wins >= 1 },
-  { id: "ach_win3", name: "Хет-трик", description: "Три победы в турнирах", icon: "crown", check: (s) => s.wins >= 3 },
-  { id: "ach_ft", name: "Финальный стол", description: "Войти в финальный стол", icon: "table", check: (s) => s.finalTables >= 1 },
-  { id: "ach_ft5", name: "Завсегдатай финалок", description: "5 финальных столов", icon: "table", check: (s) => s.finalTables >= 5 },
-  { id: "ach_ko10", name: "Охотник", description: "10 выбитых игроков", icon: "crosshair", check: (s) => s.knockouts >= 10 },
-  { id: "ach_ko25", name: "Гроза столов", description: "25 выбитых игроков", icon: "crosshair", check: (s) => s.knockouts >= 25 },
-  { id: "ach_marathon", name: "Марафонец", description: "10 сыгранных турниров", icon: "shield", check: (s) => s.tournamentsPlayed >= 10 },
-  { id: "ach_grinder", name: "Гриндер", description: "25 сыгранных турниров", icon: "flame", check: (s) => s.tournamentsPlayed >= 25 },
-  { id: "ach_itm", name: "Стабильность", description: "ITM 40% и выше (мин. 5 турниров)", icon: "gem", check: (s) => s.tournamentsPlayed >= 5 && itmRate(s) >= 40 },
-  { id: "ach_comeback", name: "Феникс", description: "Вернуться в игру после вылета", icon: "flame", check: (s) => s.returns >= 1 },
-  { id: "ach_big", name: "Крупный улов", description: "100+ очков за один турнир", icon: "gem", check: (s) => s.bestPoints >= 100 },
+/** Подписи полей статистики — для конструктора достижений в настройках */
+export const STAT_LABELS: Array<{ k: StatKey; label: string }> = [
+  { k: "tournamentsPlayed", label: "Сыграно турниров" },
+  { k: "wins", label: "Побед (1-е место)" },
+  { k: "top3", label: "Попаданий в топ-3" },
+  { k: "finalTables", label: "Финальных столов (топ-9)" },
+  { k: "knockouts", label: "Выбито игроков" },
+  { k: "rebuys", label: "Ребаев и аддонов" },
+  { k: "returns", label: "Возвращений (ре-ентри)" },
+  { k: "inMoney", label: "Попаданий в призы" },
+  { k: "bestPoints", label: "Лучший результат (очки)" },
 ];
 
-export function freshAchievements(s: UserStats, owned: string[]): AchievementDef[] {
-  return ACHIEVEMENTS.filter((a) => !owned.includes(a.id) && a.check(s));
+/** Встроенная библиотека достижений (начальное наполнение коллекции achievements) */
+export const DEFAULT_ACHIEVEMENTS: AchievementDef[] = [
+  { id: "ach_first", name: "Первая раздача", description: "Сыграть первый турнир клуба", icon: "cards", condition: { stat: "tournamentsPlayed", min: 1 }, builtIn: true },
+  { id: "ach_win", name: "Первая победа", description: "Занять 1-е место", icon: "trophy", condition: { stat: "wins", min: 1 }, builtIn: true },
+  { id: "ach_win3", name: "Хет-трик", description: "Три победы в турнирах", icon: "crown", condition: { stat: "wins", min: 3 }, builtIn: true },
+  { id: "ach_ft", name: "Финальный стол", description: "Войти в финальный стол", icon: "table", condition: { stat: "finalTables", min: 1 }, builtIn: true },
+  { id: "ach_ft5", name: "Завсегдатай финалок", description: "5 финальных столов", icon: "table", condition: { stat: "finalTables", min: 5 }, builtIn: true },
+  { id: "ach_ko10", name: "Охотник", description: "Выбить 10 игроков", icon: "crosshair", condition: { stat: "knockouts", min: 10 }, builtIn: true },
+  { id: "ach_ko25", name: "Гроза столов", description: "Выбить 25 игроков", icon: "crosshair", condition: { stat: "knockouts", min: 25 }, builtIn: true },
+  { id: "ach_marathon", name: "Марафонец", description: "10 сыгранных турниров", icon: "shield", condition: { stat: "tournamentsPlayed", min: 10 }, builtIn: true },
+  { id: "ach_grinder", name: "Гриндер", description: "25 сыгранных турниров", icon: "flame", condition: { stat: "tournamentsPlayed", min: 25 }, builtIn: true },
+  { id: "ach_money", name: "Призовой регуляр", description: "5 попаданий в призовую зону", icon: "gem", condition: { stat: "inMoney", min: 5 }, builtIn: true },
+  { id: "ach_comeback", name: "Феникс", description: "Вернуться в игру после вылета", icon: "flame", condition: { stat: "returns", min: 1 }, builtIn: true },
+  { id: "ach_big", name: "Крупный улов", description: "100+ очков за один турнир", icon: "gem", condition: { stat: "bestPoints", min: 100 }, builtIn: true },
+];
+
+/** Достижения, которые игрок выполнил, но ещё не получил */
+export function freshAchievements(s: UserStats, owned: string[], defs: AchievementDef[]): AchievementDef[] {
+  return defs.filter((a) => !owned.includes(a.id) && (s[a.condition.stat] ?? 0) >= a.condition.min);
 }
 
 /* ---------------- рейтинги ---------------- */

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bell, CheckCheck, TrendingUp } from "lucide-react";
 import type { DB, User } from "../types";
-import { ACHIEVEMENTS, avgPlace, computeBoard, cx, fmtNum, fullName, itmRate, plural, timeAgo } from "../lib/formulas";
+import { avgPlace, computeBoard, cx, fmtNum, fullName, plural, timeAgo } from "../lib/formulas";
 import { actions, noticesFor } from "../lib/store";
 import { Badge, Button, Card, EmptyState, SectionHead, Stat, toast } from "../components/ui";
 import { Leaderboard } from "../components/shared";
@@ -31,18 +31,17 @@ export function StatsTab({ user, db }: { user: User; db: DB }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Турниров" value={fmtNum(s.tournamentsPlayed)} icon={<CardsIcon size={15} />} />
-        <Stat label="Побед" value={fmtNum(s.wins)} tone="gold" icon={<TrophyIcon size={15} />} />
-        <Stat label="Топ-3" value={fmtNum(s.top3)} tone="gold" icon={<CrownIcon size={15} />} />
-        <Stat label="Финальных столов" value={fmtNum(s.finalTables)} icon={<TableIcon size={15} />} />
-        <Stat label="Нокаутов" value={fmtNum(s.knockouts)} tone="danger" icon={<CrosshairIcon size={15} />} />
-        <Stat label="Докупов" value={fmtNum(s.returns)} icon={<FlameIcon size={15} />} />
-        <Stat label="ITM" value={`${itmRate(s)}%`} tone="felt" icon={<TrendingUp size={15} />} />
-        <Stat label="Лучший результат" value={fmtNum(s.bestPoints)} tone="gold" icon={<GemIcon size={15} />} />
-        <Stat label="Среднее место" value={avgPlace(s) ? avgPlace(s).toFixed(1) : "—"} icon={<span className="font-mono text-xs">№</span>} />
-        <Stat label="Лучшее место" value={s.bestPlace ? `#${s.bestPlace}` : "—"} tone="gold" icon={<CrownIcon size={15} />} />
-        <Stat label="Ребаев и аддонов" value={fmtNum(s.rebuys)} icon={<FlameIcon size={15} />} />
-        <Stat label="В деньгах" value={fmtNum(s.inMoney)} tone="felt" icon={<TrendingUp size={15} />} />
+        <Stat label="Турниров" value={fmtNum(s.tournamentsPlayed)} icon={<CardsIcon size={15} />} hint="Турниры с опубликованными итогами" />
+        <Stat label="Побед" value={fmtNum(s.wins)} tone="gold" icon={<TrophyIcon size={15} />} hint="Занятые первые места" />
+        <Stat label="Топ-3" value={fmtNum(s.top3)} tone="gold" icon={<CrownIcon size={15} />} hint="Финиши на пьедестале" />
+        <Stat label="Финальных столов" value={fmtNum(s.finalTables)} icon={<TableIcon size={15} />} hint="Финиши в топ-9" />
+        <Stat label="Нокаутов" value={fmtNum(s.knockouts)} tone="danger" icon={<CrosshairIcon size={15} />} hint="Игроков, которых вы выбили" />
+        <Stat label="Докупов" value={fmtNum(s.returns)} icon={<FlameIcon size={15} />} hint="Возвращений в игру: ре-ентри и ласт-шансы" />
+        <Stat label="Лучший результат" value={fmtNum(s.bestPoints)} tone="gold" icon={<GemIcon size={15} />} hint="Максимум очков за один турнир" />
+        <Stat label="Попаданий в призы" value={fmtNum(s.inMoney)} tone="felt" icon={<TrendingUp size={15} />} hint="Финиши в призовой зоне (~топ-15%)" />
+        <Stat label="Среднее место" value={avgPlace(s) ? avgPlace(s).toFixed(1) : "—"} icon={<span className="font-mono text-xs">№</span>} hint="Чем меньше — тем стабильнее игра" />
+        <Stat label="Лучшее место" value={s.bestPlace ? `#${s.bestPlace}` : "—"} tone="gold" icon={<CrownIcon size={15} />} hint="Самый высокий финиш" />
+        <Stat label="Ребаев и аддонов" value={fmtNum(s.rebuys)} icon={<FlameIcon size={15} />} hint="Докупки фишек без вылета" />
       </div>
 
       <Card className="p-5">
@@ -92,22 +91,23 @@ export function StatsTab({ user, db }: { user: User; db: DB }) {
 
 /* ============================ ДОСТИЖЕНИЯ ============================ */
 
-export function AchievementsTab({ user }: { user: User }) {
-  const earned = ACHIEVEMENTS.filter((a) => user.achievements.includes(a.id)).length;
+export function AchievementsTab({ user, db }: { user: User; db: DB }) {
+  const defs = db.achievements;
+  const earned = defs.filter((a) => user.achievements.includes(a.id)).length;
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="font-display text-lg font-bold text-cream-100">Витрина наград</div>
           <div className="text-sm text-ink-400">
-            открыто <b className="font-mono text-gold-300">{earned}</b> из {ACHIEVEMENTS.length} — достижения выдаются автоматически после турниров
+            открыто <b className="font-mono text-gold-300">{earned}</b> из {defs.length} — достижения выдаются автоматически после турниров
           </div>
         </div>
-        <Badge tone="gold" className="px-3 py-1.5"><CrownIcon size={12} /> {Math.round((earned / ACHIEVEMENTS.length) * 100)}%</Badge>
+        <Badge tone="gold" className="px-3 py-1.5"><CrownIcon size={12} /> {defs.length ? Math.round((earned / defs.length) * 100) : 0}%</Badge>
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
-        {ACHIEVEMENTS.map((a, i) => {
+        {defs.map((a, i) => {
           const has = user.achievements.includes(a.id);
           const Icon = ACH_ICON[a.icon] ?? CardsIcon;
           return (
