@@ -5,6 +5,8 @@ import {
   register as firebaseRegister,
   logout as firebaseLogout,
   onAuthState,
+  waitForAuth,
+  getCurrentUser,
 } from './firebase/auth';
 import * as realtime from './firebase/realtime';
 import * as firestore from './firebase/firestore';
@@ -203,18 +205,40 @@ function notice(db: DB, userId: string, text: string, kind: Notice['kind'] = 'in
 }
 
 // ============================================================
-//  АУТЕНТИФИКАЦИЯ
+//  АУТЕНТИФИКАЦИЯ — ИСПРАВЛЕННАЯ
 // ============================================================
 
 let sessionUid: string | null = null;
+let authInitialized = false;
 
-try {
-  sessionUid = sessionStorage.getItem('gt_uid');
-} catch {
-  sessionUid = null;
+// Функция для получения текущего пользователя с ожиданием
+export async function getSessionUidAsync(): Promise<string | null> {
+  if (!authInitialized) {
+    const user = await waitForAuth();
+    authInitialized = true;
+    if (user) {
+      sessionUid = user.uid;
+      try {
+        sessionStorage.setItem('gt_uid', user.uid);
+      } catch {}
+    } else {
+      sessionUid = null;
+      try {
+        sessionStorage.removeItem('gt_uid');
+      } catch {}
+    }
+  }
+  return sessionUid;
 }
 
+// Синхронная версия для обратной совместимости
+export function getSessionUid(): string | null {
+  return sessionUid;
+}
+
+// Инициализация при загрузке
 onAuthState(async (user) => {
+  authInitialized = true;
   if (user) {
     sessionUid = user.uid;
     try {
@@ -648,21 +672,18 @@ export const actions = {
       return 'Турнир уже запущен';
     }
 
-    // Проверяем, нет ли другого активного турнира
     const other = state.tournaments.find((x) => x.id !== tId && isLive(x));
     if (other) {
       console.error('❌ Активный турнир уже есть:', other.name);
       return `Сейчас идёт «${other.name}» — одновременно возможен только один турнир`;
     }
 
-    // Проверяем наличие игроков с чекином
     const checkedIn = t.registrations.filter(r => r.status === 'checked-in');
     if (checkedIn.length < 2) {
       console.error('❌ Недостаточно игроков с чекином:', checkedIn.length);
       return `Нужно минимум 2 игрока с чекином. Сейчас: ${checkedIn.length}`;
     }
 
-    // Если нет столов, пробуем авторассадку
     if (!t.tables || t.tables.length === 0) {
       console.log('🔵 Столов нет, создаём...');
       const err = await actions.autoSeat(tId, 'balanced');
@@ -673,7 +694,6 @@ export const actions = {
       console.log('✅ Авторассадка выполнена');
     }
 
-    // Проверяем, что игроки рассажены
     const updatedT = findTournament(state, tId);
     const seated = updatedT?.tables?.reduce((sum, tb) => sum + tb.seats.filter(Boolean).length, 0) || 0;
     if (seated < 2) {
@@ -1014,9 +1034,22 @@ export const actions = {
     const stateData = await realtime.getTournamentState(tId);
     if (!stateData) return 'Состояние не найдено';
 
-    const bonuses = [...(stateData.bonuses || []), { id: uid('bn'), userId, name: name.trim(), chips: Math.round(chips), at: Date.now() }];
+    const bonuses = [...(stateData.bonuses || []), { 
+      id: uid('bn'), 
+      userId, 
+      name: name.trim(), 
+      chips: Math.round(chips), 
+      at: Date.now() 
+    }];
 
     await realtime.updateTournamentState(tId, { bonuses });
+    
+    // Обновляем локальное состояние
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.bonuses = bonuses;
+    }
+    
     notice(state, 'all', `${nicknameOf(state, userId)} получает бонус «${name}»: +${chips.toLocaleString('ru-RU')} фишек в банк`, 'win');
 
     return null;
@@ -1110,6 +1143,15 @@ export const actions = {
       console.error('❌ Ошибка обновления состояния:', error);
       return 'Ошибка обновления состояния';
     }
+
+    // Обновляем локальное состояние
+    const updatedTournament = findTournament(state, tId);
+    if (updatedTournament) {
+      updatedTournament.status = 'finished';
+      updatedTournament.results = results;
+      updatedTournament.regOpen = false;
+    }
+    emit();
 
     console.log('🔵 Обновляем статистику игроков...');
     const seasonId = t.seasonId;
@@ -1388,9 +1430,10 @@ export function getVersion(): number {
   return version;
 }
 
-export function getSessionUid(): string | null {
-  return sessionUid;
-}
+// Экспортируем асинхронную версию для получения сессии
+export { getSessionUidAsync as getSessionUidAsync };
+// Синхронная версия для обратной совместимости
+export { getSessionUid };
 
 export function noticesFor(db: DB, userId: string): Notice[] {
   return db.notices.filter((n) => n.userId === userId || n.userId === 'all');

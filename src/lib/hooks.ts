@@ -1,18 +1,65 @@
+// src/lib/hooks.ts
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DB, Tournament, User } from "../types";
 import { actions, getSessionUid, getState, getVersion, subscribeStore } from "./store";
+import { waitForAuth, getCurrentUser, onAuthState } from "./firebase/auth";
 
-/** Подписка на всё хранилище — аналог onValue() в RTDB. */
+// Подписка на всё хранилище
 export function useDB(): DB {
   useSyncExternalStore(subscribeStore, getVersion, getVersion);
   return getState();
 }
 
-export function useAuth(): { user: User | null } {
+export function useAuth(): { user: User | null; loading: boolean } {
   const db = useDB();
-  const uidv = getSessionUid();
-  const user = uidv ? db.users.find((u) => u.id === uidv) ?? null : null;
-  return { user };
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(() => {
+    const uid = getSessionUid();
+    return uid ? db.users.find((u) => u.id === uid) ?? null : null;
+  });
+
+  useEffect(() => {
+    // Восстанавливаем сессию
+    const restoreSession = async () => {
+      try {
+        const firebaseUser = await waitForAuth();
+        if (firebaseUser) {
+          const dbUser = db.users.find((u) => u.id === firebaseUser.uid) ?? null;
+          setUser(dbUser);
+          if (dbUser) {
+            actions.heartbeat(dbUser.id, null);
+          }
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Ошибка восстановления сессии:', error);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    restoreSession();
+
+    // Подписка на изменения
+    const unsubscribe = onAuthState(async (firebaseUser) => {
+      if (firebaseUser) {
+        const dbUser = db.users.find((u) => u.id === firebaseUser.uid) ?? null;
+        setUser(dbUser);
+        if (dbUser) {
+          actions.heartbeat(dbUser.id, null);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [db.users]);
+
+  return { user, loading };
 }
 
 /** Тикающее «сейчас» — для таймеров и бегущих строк. */

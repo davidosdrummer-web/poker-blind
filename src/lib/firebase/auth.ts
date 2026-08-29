@@ -10,10 +10,34 @@ import {
   browserLocalPersistence,
 } from 'firebase/auth';
 
-// Устанавливаем постоянную сессию (сохраняется даже после перезагрузки)
+// Устанавливаем постоянную сессию
 setPersistence(auth, browserLocalPersistence)
   .then(() => console.log('✅ Auth persistence set to LOCAL'))
   .catch((error) => console.error('❌ Auth persistence error:', error));
+
+// Переменная для хранения состояния готовности
+let authReady = false;
+let authUser: FirebaseUser | null = null;
+const authListeners: ((user: FirebaseUser | null) => void)[] = [];
+
+// Инициализация с восстановлением сессии
+export function initAuth() {
+  return new Promise<void>((resolve) => {
+    // Если уже готово, сразу разрешаем
+    if (authReady) {
+      resolve();
+      return;
+    }
+    
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      authUser = user;
+      authReady = true;
+      authListeners.forEach((cb) => cb(user));
+      unsubscribe();
+      resolve();
+    });
+  });
+}
 
 // Вход
 export async function login(email: string, password: string) {
@@ -47,6 +71,10 @@ export async function logout() {
 
 // Подписка на состояние аутентификации
 export function onAuthState(callback: (user: FirebaseUser | null) => void) {
+  if (authReady) {
+    callback(authUser);
+  }
+  authListeners.push(callback);
   return onAuthStateChanged(auth, callback);
 }
 
@@ -58,4 +86,20 @@ export function getCurrentUser() {
 // Проверка, авторизован ли пользователь
 export function isAuthenticated(): boolean {
   return auth.currentUser !== null;
+}
+
+// Ожидание готовности аутентификации
+export function waitForAuth(): Promise<FirebaseUser | null> {
+  return new Promise((resolve) => {
+    if (authReady) {
+      resolve(authUser);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      authReady = true;
+      authUser = user;
+      unsubscribe();
+      resolve(user);
+    });
+  });
 }

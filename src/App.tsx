@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+// src/App.tsx
+import { useEffect, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useDB } from "./lib/hooks";
 import { useSoundEngine } from "./lib/sound";
+import { initAuth } from "./lib/firebase/auth";
 import { Toaster } from "./components/ui";
 import AuthPage from "./pages/auth";
 import DisplayShell from "./pages/display";
@@ -18,7 +20,6 @@ import SeasonPage from "./pages/admin/season";
 import { DisplaysPage, SettingsPage } from "./pages/admin/ops";
 import PlayerCabinet from "./pages/player";
 
-/** Акцентный цвет клуба применяется к CSS-переменным темы вживую. */
 function useClubTheme() {
   const db = useDB();
   useEffect(() => {
@@ -33,20 +34,37 @@ function useClubTheme() {
 
 export default function App() {
   const db = useDB();
+  const [authReady, setAuthReady] = useState(false);
   useClubTheme();
   useSoundEngine(db);
+
+  // Инициализация аутентификации при старте
+  useEffect(() => {
+    initAuth()
+      .then(() => {
+        setAuthReady(true);
+      })
+      .catch(() => {
+        // Даже если ошибка — показываем приложение
+        setAuthReady(true);
+      });
+  }, []);
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink-950">
+        <div className="animate-pulse text-gold-500">Загрузка...</div>
+      </div>
+    );
+  }
+
   return (
     <HashRouter>
       <Routes>
-        {/* стартовая страница платформы — авторизация */}
         <Route path="/" element={<AuthPage />} />
         <Route path="/auth" element={<AuthPage />} />
-
-        {/* ТВ-экраны: анонимный доступ */}
         <Route path="/display" element={<Navigate to="/display/main" replace />} />
         <Route path="/display/:mode" element={<DisplayShell />} />
-
-        {/* админ-панель: admin + operator */}
         <Route
           path="/admin"
           element={
@@ -78,8 +96,6 @@ export default function App() {
             }
           />
         </Route>
-
-        {/* личный кабинет: любая авторизованная роль */}
         <Route
           path="/player"
           element={
@@ -88,7 +104,6 @@ export default function App() {
             </RequireRole>
           }
         />
-
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toaster />
