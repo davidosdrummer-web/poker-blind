@@ -209,7 +209,7 @@ export function Lobby() {
               {[
                 { v: db.users.filter((u) => u.role === "player").length, l: "игроков" },
                 { v: db.tournaments.filter((t) => t.results).length, l: "сыграно" },
-                { v: online, l: "онлайн" },
+                { v: online, l: "в клубе" },
               ].map((x) => (
                 <div key={x.l} className="rounded-lg border border-ink-700 bg-ink-850/70 px-2 py-3">
                   <div className="tabular font-mono text-xl font-bold text-gold-300">{x.v}</div>

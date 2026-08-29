@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarRange, Swords, Trophy, Users } from "lucide-react";
+import { ArrowLeft, CalendarRange, Swords, Trophy, UserPlus, Users, X } from "lucide-react";
 import { actions } from "../../lib/store";
 import { useDB } from "../../lib/hooks";
 import { computeBoard, cx, fmtDate, fmtNum, fullName, scoringText } from "../../lib/formulas";
@@ -192,17 +192,75 @@ export default function SeasonPage() {
             </p>
 
             {finalT ? (
-              <div className="mt-4 rounded-xl border border-felt-400/40 bg-felt-500/10 p-4">
-                <div className="flex items-center gap-2 text-sm font-bold text-felt-300">
-                  <Swords size={14} /> Финал сформирован
+              <div className="mt-4 space-y-3 rounded-xl border border-felt-400/40 bg-felt-500/10 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm font-bold text-felt-300">
+                    <Swords size={14} /> Финал сформирован
+                  </div>
+                  <StatusBadge status={finalT.status} />
                 </div>
-                <Link to={`/admin/tournaments/${finalT.id}`} className="mt-1 block truncate text-sm font-bold text-cream-100 transition-colors hover:text-gold-300">
+                <Link to={`/admin/tournaments/${finalT.id}`} className="block truncate text-sm font-bold text-cream-100 transition-colors hover:text-gold-300">
                   {finalT.name} →
                 </Link>
-                <div className="mt-1 text-[11px] text-ink-400">
-                  участников: {finalT.registrations.length} · {fmtDate(new Date(finalT.date).getTime())}
+                <div className="text-[11px] text-ink-400">
+                  участников: <b className="text-cream-100">{finalT.registrations.length}</b> / {finalT.maxPlayers} · {fmtDate(new Date(finalT.date).getTime())}
                 </div>
-                <StatusBadge status={finalT.status} />
+
+                {/* участники финала: подтверждение и резерв */}
+                <div>
+                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-gold-500">состав финала</div>
+                  <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                    {finalT.registrations.map((reg) => {
+                      const u = db.users.find((x) => x.id === reg.userId);
+                      if (!u) return null;
+                      const rank = board.find((b) => b.userId === reg.userId)?.rank;
+                      const isReserve = (rank ?? 99) > 18;
+                      return (
+                        <div key={reg.userId} className="flex items-center gap-2 rounded-lg bg-ink-800/60 px-2 py-1.5">
+                          <span className={cx(
+                            "tabular w-7 shrink-0 text-center font-mono text-[11px] font-extrabold",
+                            rank === 1 ? "text-gold-400" : rank === 2 ? "text-ink-200" : rank === 3 ? "text-[#c07a3d]" : "text-ink-500",
+                          )}>
+                            {rank ? `#${rank}` : "—"}
+                          </span>
+                          <Avatar name={fullName(u)} hue={u.hue} size={22} photo={u.photoURL} />
+                          <span className="min-w-0 flex-1 truncate text-xs font-bold text-cream-100">{u.nickname}</span>
+                          {isReserve ? <Badge tone="cream">резерв</Badge> : <Badge tone="gold">топ-18</Badge>}
+                          <Badge tone={reg.status === "checked-in" ? "felt" : "ink"}>
+                            {reg.status === "checked-in" ? "чекин" : "записан"}
+                          </Badge>
+                          {finalT.status === "registration" && (
+                            <button
+                              onClick={() => { actions.removeRegistration(finalT.id, reg.userId); toast(`${u.nickname} убран из финала`, "info"); }}
+                              className="shrink-0 rounded p-1 text-ink-500 transition-colors hover:bg-danger-500/15 hover:text-danger-400"
+                              title="Убрать (не прошёл регистрацию)"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {finalT.status === "registration" && (
+                  <>
+                    <Button
+                      variant="dark" size="sm" className="w-full"
+                      disabled={finalT.registrations.length >= finalT.maxPlayers}
+                      onClick={() => {
+                        const err = actions.fillSeasonFinalReserves(finalT.id);
+                        toast(err ?? "Свободные места заполнены резервом (с 19-го места)", err ? "err" : "ok");
+                      }}
+                    >
+                      <UserPlus size={14} /> Заполнить резервом (19+ место)
+                    </Button>
+                    <p className="text-[10px] leading-relaxed text-ink-500">
+                      Уберите игрока, который не прошёл регистрацию, — затем дозаполните финал: места займут игроки с 19-го места и ниже по убыванию рейтинга.
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <>

@@ -258,11 +258,6 @@ export default function TournamentEditorPage() {
               <Field label="Стартовый стек">
                 <Input type="number" value={draft.startingChips} onChange={(e) => patch({ startingChips: Number(e.target.value) || 0 })} className="font-mono" disabled={!canEditGame} />
               </Field>
-              <Field label="Тип турнира">
-                <Select value={draft.type} onChange={(e) => patch({ type: e.target.value as TournamentType })} disabled={!canEditGame}>
-                  {(Object.keys(TYPE_LABELS) as TournamentType[]).map((k) => <option key={k} value={k}>{TYPE_LABELS[k]}</option>)}
-                </Select>
-              </Field>
               <Field label="Регистрация после старта" hint="минут поздней регистрации, 0 — выключено">
                 <Input type="number" value={draft.lateRegMinutes} onChange={(e) => patch({ lateRegMinutes: Math.max(0, Number(e.target.value) || 0) })} className="font-mono" />
               </Field>

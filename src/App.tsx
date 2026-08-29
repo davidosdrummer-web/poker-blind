@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useDB } from "./lib/hooks";
+import { useSoundEngine } from "./lib/sound";
 import { Toaster } from "./components/ui";
-import AuthPage, { Lobby } from "./pages/auth";
+import AuthPage from "./pages/auth";
 import DisplayShell from "./pages/display";
 import AdminLayout, { RequireRole } from "./pages/admin/layout";
 import ConsolePage from "./pages/admin/console";
@@ -22,18 +23,23 @@ function useClubTheme() {
   const db = useDB();
   useEffect(() => {
     const c = db.settings.primary || "#d4a017";
+    const bg = db.settings.background || "#0a0a12";
     const root = document.documentElement.style;
     root.setProperty("--color-gold-500", c);
     root.setProperty("--color-gold-400", c);
-  }, [db.settings.primary]);
+    root.setProperty("--color-ink-950", bg);
+  }, [db.settings.primary, db.settings.background]);
 }
 
 export default function App() {
+  const db = useDB();
   useClubTheme();
+  useSoundEngine(db);
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Lobby />} />
+        {/* стартовая страница платформы — авторизация */}
+        <Route path="/" element={<AuthPage />} />
         <Route path="/auth" element={<AuthPage />} />
 
         {/* ТВ-экраны: анонимный доступ */}

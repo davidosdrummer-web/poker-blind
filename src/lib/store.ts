@@ -856,6 +856,34 @@ export const actions = {
     return id;
   },
 
+  /**
+   * Дозаполнение финала сезона резервом: если кто-то из топ-18 не прошёл
+   * регистрацию (его убрали из списка), свободные места занимают игроки
+   * с 19-го места и ниже — строго по убыванию рейтинга.
+   */
+  fillSeasonFinalReserves(tId: string): string | null {
+    const t = state.tournaments.find((x) => x.id === tId);
+    if (!t || !t.nonScoring) return "Это не финальный турнир сезона";
+    if (t.status === "finished") return "Турнир завершён";
+    const board = computeBoard(state, t.seasonId);
+    const top18 = new Set(board.slice(0, 18).map((b) => b.userId));
+    let added = 0;
+    mutate((db) => {
+      const tt = db.tournaments.find((x) => x.id === tId)!;
+      const registered = new Set(tt.registrations.map((r) => r.userId));
+      for (const row of board) {
+        if (tt.registrations.length >= tt.maxPlayers) break;
+        if (top18.has(row.userId)) continue;      // резерв — только ниже топ-18
+        if (registered.has(row.userId)) continue;
+        tt.registrations.push({ userId: row.userId, status: "registered", registeredAt: Date.now(), checkedInAt: null });
+        registered.add(row.userId);
+        added += 1;
+      }
+      if (added > 0) notice(db, "all", `Финал сезона: из резерва добавлено игроков — ${added}`, "info");
+    });
+    return null;
+  },
+
   /* ---------- экраны, настройки, уведомления ---------- */
 
   saveDisplay(d: DisplayCfg) {

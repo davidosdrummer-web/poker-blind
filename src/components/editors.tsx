@@ -208,14 +208,21 @@ export function BonusDefsEditor({ value, onChange }: { value: BonusDef[]; onChan
           Бонусов нет. Создайте пресеты — на пульте они появятся одной кнопкой.
         </div>
       )}
+      {value.length > 0 && (
+        <div className="mb-1 grid grid-cols-[24px_1fr_110px_24px] items-center gap-2 px-2.5 font-mono text-[9px] uppercase tracking-wider text-ink-500">
+          <span className="text-center">№</span>
+          <span>Название бонуса</span>
+          <span className="text-center">Фишек</span>
+          <span />
+        </div>
+      )}
       <div className="space-y-1.5">
         {value.map((b, i) => (
-          <div key={i} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-800/50 px-2.5 py-1.5">
-            <span className="shrink-0 font-mono text-[10px] font-bold text-gold-500">{i + 1}</span>
-            <Input value={b.name} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder="Название бонуса" className="h-8 flex-1 border-transparent bg-transparent text-sm" />
-            <span className="shrink-0 text-[10px] text-ink-500">фишек</span>
-            <Input type="number" value={b.chips} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, chips: Math.max(0, Number(e.target.value) || 0) } : x)))} className="h-8 w-28 border-transparent bg-transparent text-center font-mono text-sm font-bold text-gold-200" />
-            <button onClick={() => onChange(value.filter((_, j) => j !== i))} className="shrink-0 text-ink-500 transition-colors hover:text-danger-400" title="Удалить">
+          <div key={i} className="grid grid-cols-[24px_1fr_110px_24px] items-center gap-2 rounded-lg border border-ink-700 bg-ink-800/50 px-2.5 py-1.5">
+            <span className="shrink-0 text-center font-mono text-[10px] font-bold text-gold-500">{i + 1}</span>
+            <Input value={b.name} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder="Название бонуса" className="h-8 border-transparent bg-transparent text-sm" />
+            <Input type="number" value={b.chips} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, chips: Math.max(0, Number(e.target.value) || 0) } : x)))} className="h-8 border-transparent bg-transparent text-center font-mono text-sm font-bold text-gold-200" />
+            <button onClick={() => onChange(value.filter((_, j) => j !== i))} className="shrink-0 text-center text-ink-500 transition-colors hover:text-danger-400" title="Удалить">
               <X size={14} />
             </button>
           </div>

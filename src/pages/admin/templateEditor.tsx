@@ -141,11 +141,6 @@ export default function TemplateEditorPage() {
               <Field label="Название шаблона">
                 <Input value={draft.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Пятничный Фризаут" />
               </Field>
-              <Field label="Тип турнира">
-                <Select value={draft.type} onChange={(e) => patch({ type: e.target.value as TournamentType })}>
-                  {(Object.keys(TYPE_LABELS) as TournamentType[]).map((k) => <option key={k} value={k}>{TYPE_LABELS[k]}</option>)}
-                </Select>
-              </Field>
               <Field label="Стартовый стек">
                 <Input type="number" value={draft.startingChips} onChange={(e) => patch({ startingChips: Number(e.target.value) || 0 })} className="font-mono" />
               </Field>

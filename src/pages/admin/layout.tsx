@@ -71,7 +71,7 @@ export default function AdminLayout() {
 
         <div className="border-t border-ink-800 p-3">
           <div className="mb-2 flex items-center justify-between rounded-lg bg-ink-800/70 px-3 py-2">
-            <span className="flex items-center gap-1.5 text-xs text-ink-300"><Wifi size={13} className="text-felt-300" /> онлайн</span>
+            <span className="flex items-center gap-1.5 text-xs text-ink-300"><Wifi size={13} className="text-felt-300" /> в клубе</span>
             <span className="tabular font-mono text-sm font-bold text-felt-300">{online}</span>
           </div>
           <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
