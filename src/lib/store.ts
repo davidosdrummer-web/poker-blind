@@ -211,7 +211,6 @@ function notice(db: DB, userId: string, text: string, kind: Notice['kind'] = 'in
 let sessionUid: string | null = null;
 let authInitialized = false;
 
-// Инициализация при загрузке
 onAuthState(async (user) => {
   authInitialized = true;
   if (user) {
@@ -708,6 +707,18 @@ export const actions = {
       return 'Ошибка при обновлении метаданных';
     }
 
+    // Обновляем локальное состояние
+    const finalT = findTournament(state, tId);
+    if (finalT) {
+      finalT.status = 'active';
+      finalT.currentLevel = 0;
+      finalT.levelStartedAt = now;
+      finalT.lateRegUntil = lateRegUntil;
+      finalT.pausedRemaining = null;
+      finalT.breakEndsAt = null;
+      emit();
+    }
+
     notice(state, 'all', `Турнир «${t.name}» стартовал — фишки в игре`, 'alert');
     if (t.lateRegMinutes > 0) {
       notice(state, 'all', `Поздняя регистрация на «${t.name}» открыта ${t.lateRegMinutes} мин`, 'info');
@@ -731,6 +742,14 @@ export const actions = {
     });
 
     await firestore.tournamentsMeta.update(tId, { status: 'paused' });
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.status = 'paused';
+      updatedT.pausedRemaining = rem;
+      updatedT.levelStartedAt = null;
+      emit();
+    }
   },
 
   async resumeTournament(tId: string) {
@@ -748,6 +767,14 @@ export const actions = {
     });
 
     await firestore.tournamentsMeta.update(tId, { status: 'active' });
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.status = 'active';
+      updatedT.levelStartedAt = now - (dur - rem);
+      updatedT.pausedRemaining = null;
+      emit();
+    }
   },
 
   async adjustTimer(tId: string, deltaSec: number): Promise<string | null> {
@@ -794,10 +821,24 @@ export const actions = {
     }
   },
 
+  // ============================================================
+  //  ИСПРАВЛЕННАЯ ФУНКЦИЯ nextLevel
+  // ============================================================
   async nextLevel(tId: string): Promise<string | null> {
+    console.log('🔵 nextLevel() вызвана для', tId);
+    
     const t = findTournament(state, tId);
-    if (!t) return 'Турнир не найден';
-    if (t.currentLevel >= t.levels.length - 1) return 'Это последний уровень структуры';
+    if (!t) {
+      console.error('❌ Турнир не найден');
+      return 'Турнир не найден';
+    }
+    
+    console.log('🔵 Текущий уровень:', t.currentLevel, 'Всего уровней:', t.levels.length);
+    
+    if (t.currentLevel >= t.levels.length - 1) {
+      console.warn('⚠️ Это последний уровень структуры');
+      return 'Это последний уровень структуры';
+    }
 
     const newLevel = t.currentLevel + 1;
     const now = Date.now();
@@ -822,7 +863,32 @@ export const actions = {
       await firestore.tournamentsMeta.update(tId, { status: 'active' });
     }
 
+    console.log('🔵 Обновляем состояние в Realtime DB...', updateData);
     await realtime.updateTournamentState(tId, updateData);
+    
+    // ========== КРИТИЧЕСКИ ВАЖНО: принудительно обновляем локальное состояние ==========
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.currentLevel = newLevel;
+      updatedT.levelStartedAt = now;
+      updatedT.status = updateData.status;
+      if (br) {
+        updatedT.breakEndsAt = updateData.breakEndsAt;
+      } else {
+        updatedT.breakEndsAt = null;
+      }
+      updatedT.pausedRemaining = null;
+      console.log('✅ Локальное состояние обновлено:', { 
+        currentLevel: updatedT.currentLevel, 
+        levelStartedAt: updatedT.levelStartedAt,
+        status: updatedT.status
+      });
+      emit(); // Уведомляем подписчиков
+    } else {
+      console.warn('⚠️ Турнир не найден в локальном состоянии после обновления');
+    }
+    
+    console.log('✅ Уровень повышен до', newLevel + 1);
     return null;
   },
 
@@ -842,6 +908,16 @@ export const actions = {
     });
 
     await firestore.tournamentsMeta.update(tId, { status: 'active' });
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.currentLevel = newLevel;
+      updatedT.levelStartedAt = now;
+      updatedT.status = 'active';
+      updatedT.breakEndsAt = null;
+      updatedT.pausedRemaining = null;
+      emit();
+    }
   },
 
   async startBreak(tId: string, minutes = 15) {
@@ -859,6 +935,16 @@ export const actions = {
     });
 
     await firestore.tournamentsMeta.update(tId, { status: 'break' });
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.status = 'break';
+      updatedT.breakEndsAt = now + minutes * 60000;
+      updatedT.pausedRemaining = rem;
+      updatedT.levelStartedAt = null;
+      emit();
+    }
+
     notice(state, 'all', `«${t.name}»: перерыв ${minutes} мин`, 'info');
   },
 
@@ -878,6 +964,15 @@ export const actions = {
     });
 
     await firestore.tournamentsMeta.update(tId, { status: 'active' });
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.status = 'active';
+      updatedT.levelStartedAt = now - (dur - rem);
+      updatedT.breakEndsAt = null;
+      updatedT.pausedRemaining = null;
+      emit();
+    }
   },
 
   // ---------- Выбывшие и возвраты ----------
@@ -924,6 +1019,14 @@ export const actions = {
     console.log('🔵 Сохраняем в Realtime DB...');
     await realtime.updateTournamentState(tId, { tables, knockouts });
 
+    // Обновляем локальное состояние
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      updatedT.tables = tables;
+      updatedT.knockouts = knockouts;
+      emit();
+    }
+
     const name = nicknameOf(state, userId);
     if (killerId) {
       notice(state, 'all', `Нокаут! ${nicknameOf(state, killerId)} выбивает ${name}`, 'alert');
@@ -931,7 +1034,6 @@ export const actions = {
       notice(state, 'all', `${name} покидает турнир (блайнды)`, 'info');
     }
 
-    const updatedT = findTournament(state, tId);
     if (updatedT) {
       formFinalTableIfNeeded(state, updatedT);
       if (remainingCount(updatedT) === 1) {
@@ -989,9 +1091,25 @@ export const actions = {
       }
 
       await realtime.updateTournamentState(tId, { rebuys, knockouts, tables });
+      
+      const updatedT = findTournament(state, tId);
+      if (updatedT) {
+        updatedT.rebuys = rebuys;
+        updatedT.knockouts = knockouts;
+        updatedT.tables = tables;
+        emit();
+      }
+      
       notice(state, 'all', `${nicknameOf(state, userId)} возвращается в игру`, 'alert');
     } else {
       await realtime.updateTournamentState(tId, { rebuys });
+      
+      const updatedT = findTournament(state, tId);
+      if (updatedT) {
+        updatedT.rebuys = rebuys;
+        emit();
+      }
+      
       notice(state, 'all', `${nicknameOf(state, userId)} — ${REBUY_LABELS[kind] || kind}`, 'info');
     }
 
@@ -1061,6 +1179,7 @@ export const actions = {
     if (updatedT) {
       updatedT.bonuses = bonuses;
       console.log('✅ Локальное состояние обновлено');
+      emit();
     }
     
     // Сохраняем в Firestore для истории
@@ -1071,11 +1190,9 @@ export const actions = {
       console.log('✅ Бонусы сохранены в Firestore');
     } catch (error) {
       console.error('❌ Ошибка сохранения бонусов в Firestore:', error);
-      // Не возвращаем ошибку, так как в Realtime уже сохранили
     }
     
     notice(state, 'all', `${nicknameOf(state, userId)} получает бонус «${name}»: +${chips.toLocaleString('ru-RU')} фишек в банк`, 'win');
-    emit(); // Уведомляем подписчиков
 
     console.log('✅ Бонус успешно выдан!');
     return null;
@@ -1456,7 +1573,6 @@ export function getVersion(): number {
   return version;
 }
 
-// Асинхронная версия для получения сессии
 export async function getSessionUid(): Promise<string | null> {
   if (!authInitialized) {
     const user = await waitForAuth();
@@ -1476,7 +1592,6 @@ export async function getSessionUid(): Promise<string | null> {
   return sessionUid;
 }
 
-// Синхронная версия для быстрого доступа
 export function getSessionUidSync(): string | null {
   return sessionUid;
 }
