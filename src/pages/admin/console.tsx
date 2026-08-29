@@ -137,15 +137,16 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
   };
 
   useHotkeys({
-    " ": togglePause,
+    " ": () => { if (modal === "") togglePause(); },
     n: () => { 
+      if (modal !== "") return;
       const err = actions.nextLevel(t.id); 
       if (err) toast(err, "err"); 
       else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
     },
-    p: () => { actions.prevLevel(t.id); onRefresh(); },
+    p: () => { if (modal === "") { actions.prevLevel(t.id); onRefresh(); } },
     b: () => { 
-      if (t.status === "active") { 
+      if (modal === "" && t.status === "active") { 
         actions.startBreak(t.id, breakMin); 
         toast(`Перерыв ${breakMin} мин`, "info"); 
         onRefresh();
@@ -544,7 +545,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       {/* Модальные окна */}
       
       {/* Выбивание */}
-      <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание">
+      <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание" preventClose={modal !== ""}>
         <div className="space-y-4">
           <Field label="Кто выбыл">
             <Select value={koVictim} onChange={(e) => setKoVictim(e.target.value)}>
@@ -568,7 +569,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       </Modal>
 
       {/* Бонус */}
-      <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус">
+      <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус" preventClose={modal !== ""}>
         <div className="space-y-4">
           <Field label="Игрок">
             <Select value={bnUser} onChange={(e) => setBnUser(e.target.value)}>
@@ -582,7 +583,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
                 {t.bonusDefs.map((b) => (
                   <button
                     key={b.name}
-                    onClick={() => { setBnName(b.name); setBnChips(b.chips); }}
+                    onClick={(e) => { e.stopPropagation(); setBnName(b.name); setBnChips(b.chips); }}
                     className={cx(
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-all",
                       bnName === b.name ? "border-gold-500/70 bg-gold-500/15 text-gold-200" : "border-ink-600 text-ink-300 hover:border-gold-500/50",
@@ -613,7 +614,7 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
       </Modal>
 
       {/* Завершение */}
-      <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?">
+      <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?" preventClose={modal !== ""}>
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-ink-300">
             Места будут присвоены автоматически: оставшиеся игроки — по порядку чекина, выбывшие — в обратном порядке вылета.

@@ -125,25 +125,27 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 
 /* ---------------- Modal ---------------- */
 
-export function Modal({ open, onClose, title, children, width = "max-w-md" }: {
-  open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; width?: string;
+export function Modal({ open, onClose, title, children, width = "max-w-md", preventClose = false }: {
+  open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; width?: string; preventClose?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !preventClose) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, preventClose]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-ink-950/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-ink-950/80 backdrop-blur-sm" onClick={preventClose ? undefined : onClose} />
       <div className={cx("animate-pop relative w-full rounded-xl border border-ink-600 bg-ink-850 p-5 shadow-2xl", width)}>
         <div className="mb-4 flex items-center justify-between gap-4">
           <h3 className="font-display text-base font-bold text-cream-100">{title}</h3>
-          <button onClick={onClose} className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-ink-700 hover:text-cream-100" aria-label="Закрыть">
-            <X size={16} />
-          </button>
+          {!preventClose && (
+            <button onClick={onClose} className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-ink-700 hover:text-cream-100" aria-label="Закрыть">
+              <X size={16} />
+            </button>
+          )}
         </div>
         {children}
       </div>
