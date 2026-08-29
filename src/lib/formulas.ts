@@ -1,15 +1,16 @@
+// src/lib/formulas.ts
 import type {
   AchievementDef, BlindLevel, BoardRow, BreakRule, DB, RebuyKind, ScoringConfig, StatKey,
   TableState, Tournament, TournamentType, User, UserStats,
-} from "../types";
+} from '../types';
+import { uid, DEFAULT_ACHIEVEMENTS, defaultScoring, defaultGrid, REBUY_LABELS } from './constants';
 
-/* ---------------- утилиты ---------------- */
+// Re-экспорты для совместимости
+export { uid, DEFAULT_ACHIEVEMENTS, defaultScoring, defaultGrid, REBUY_LABELS };
 
-let counter = 0;
-export function uid(prefix: string): string {
-  counter += 1;
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${counter}`;
-}
+// ============================================================
+// УТИЛИТЫ
+// ============================================================
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -70,7 +71,9 @@ export function fmtDuration(min: number): string {
   return `${h} ч ${m} мин`;
 }
 
-/* ---------------- таймеры и состояние турнира ---------------- */
+// ============================================================
+// ТАЙМЕРЫ И СОСТОЯНИЕ ТУРНИРА
+// ============================================================
 
 export function levelDurationMs(t: Tournament): number {
   const lvl = t.levels[Math.min(t.currentLevel, t.levels.length - 1)];
@@ -115,9 +118,10 @@ export function totalSeats(t: { tables: TableState[] }): number {
   return t.tables.reduce((s, tb) => s + tb.seats.length, 0);
 }
 
-/* ---------------- банк фишек ---------------- */
+// ============================================================
+// БАНК ФИШЕК
+// ============================================================
 
-/** Сколько фишек вносит в банк действие */
 export function injectionChips(t: Tournament, kind: RebuyKind): number {
   if (kind === "rebuy") return t.rebuyCostChips || t.startingChips;
   if (kind === "addon") return Math.round(t.startingChips * 0.5);
@@ -136,10 +140,6 @@ export interface ChipBreakdown {
   total: number;
 }
 
-/**
- * Банк турнира: входы + все возвраты + бонусы.
- * Фишки выбывших НЕ вычитаются — стеки по ходу игры не отслеживаются.
- */
 export function chipBreakdown(t: Tournament): ChipBreakdown {
   const entries = t.registrations.filter((r) => r.status !== "refunded").length;
   const entryChips = entries * t.startingChips;
@@ -163,16 +163,9 @@ export function averageStack(t: Tournament): number {
   return Math.round(chipBreakdown(t).total / n);
 }
 
-/* ---------------- очки ---------------- */
-
-export function defaultGrid(): Array<{ place: number; points: number }> {
-  const pts = [100, 70, 55, 45, 38, 32, 27, 23, 20, 18];
-  return pts.map((points, i) => ({ place: i + 1, points }));
-}
-
-export function defaultScoring(): ScoringConfig {
-  return { grid: defaultGrid(), participation: 10, knockoutPoints: 5, knockoutEnabled: true };
-}
+// ============================================================
+// ОЧКИ
+// ============================================================
 
 export function scoreForPlace(s: ScoringConfig, place: number, knockouts: number): number {
   const row = s.grid.find((g) => g.place === place);
@@ -195,7 +188,9 @@ export const TYPE_LABELS: Record<TournamentType, string> = {
   freezeout: "Фризаут", rebuy: "Ребай", addon: "Аддон", bounty: "Баунти",
 };
 
-/* ---------------- статистика и достижения ---------------- */
+// ============================================================
+// СТАТИСТИКА И ДОСТИЖЕНИЯ
+// ============================================================
 
 export function emptyStats(): UserStats {
   return { tournamentsPlayed: 0, wins: 0, top3: 0, finalTables: 0, knockouts: 0, rebuys: 0, returns: 0, inMoney: 0, totalPlace: 0, bestPlace: 0, bestPoints: 0 };
@@ -209,7 +204,6 @@ export function itmRate(s: UserStats): number {
   return s.tournamentsPlayed ? Math.round((s.inMoney / s.tournamentsPlayed) * 100) : 0;
 }
 
-/** Подписи полей статистики — для конструктора достижений в настройках */
 export const STAT_LABELS: Array<{ k: StatKey; label: string }> = [
   { k: "tournamentsPlayed", label: "Сыграно турниров" },
   { k: "wins", label: "Побед (1-е место)" },
@@ -222,33 +216,14 @@ export const STAT_LABELS: Array<{ k: StatKey; label: string }> = [
   { k: "bestPoints", label: "Лучший результат (очки)" },
 ];
 
-/** Встроенная библиотека достижений (начальное наполнение коллекции achievements) */
-export const DEFAULT_ACHIEVEMENTS: AchievementDef[] = [
-  { id: "ach_first", name: "Первая раздача", description: "Сыграть первый турнир клуба", icon: "cards", condition: { stat: "tournamentsPlayed", min: 1 }, builtIn: true },
-  { id: "ach_win", name: "Первая победа", description: "Занять 1-е место", icon: "trophy", condition: { stat: "wins", min: 1 }, builtIn: true },
-  { id: "ach_win3", name: "Хет-трик", description: "Три победы в турнирах", icon: "crown", condition: { stat: "wins", min: 3 }, builtIn: true },
-  { id: "ach_ft", name: "Финальный стол", description: "Войти в финальный стол", icon: "table", condition: { stat: "finalTables", min: 1 }, builtIn: true },
-  { id: "ach_ft5", name: "Завсегдатай финалок", description: "5 финальных столов", icon: "table", condition: { stat: "finalTables", min: 5 }, builtIn: true },
-  { id: "ach_ko10", name: "Охотник", description: "Выбить 10 игроков", icon: "crosshair", condition: { stat: "knockouts", min: 10 }, builtIn: true },
-  { id: "ach_ko25", name: "Гроза столов", description: "Выбить 25 игроков", icon: "crosshair", condition: { stat: "knockouts", min: 25 }, builtIn: true },
-  { id: "ach_marathon", name: "Марафонец", description: "10 сыгранных турниров", icon: "shield", condition: { stat: "tournamentsPlayed", min: 10 }, builtIn: true },
-  { id: "ach_grinder", name: "Гриндер", description: "25 сыгранных турниров", icon: "flame", condition: { stat: "tournamentsPlayed", min: 25 }, builtIn: true },
-  { id: "ach_money", name: "Призовой регуляр", description: "5 попаданий в призовую зону", icon: "gem", condition: { stat: "inMoney", min: 5 }, builtIn: true },
-  { id: "ach_comeback", name: "Феникс", description: "Вернуться в игру после вылета", icon: "flame", condition: { stat: "returns", min: 1 }, builtIn: true },
-  { id: "ach_big", name: "Крупный улов", description: "100+ очков за один турнир", icon: "gem", condition: { stat: "bestPoints", min: 100 }, builtIn: true },
-];
-
-/** Достижения, которые игрок выполнил, но ещё не получил */
 export function freshAchievements(s: UserStats, owned: string[], defs: AchievementDef[]): AchievementDef[] {
   return defs.filter((a) => !owned.includes(a.id) && (s[a.condition.stat] ?? 0) >= a.condition.min);
 }
 
-/* ---------------- рейтинги ---------------- */
+// ============================================================
+// РЕЙТИНГИ
+// ============================================================
 
-/**
- * Накопительный рейтинг по прошедшим турнирам.
- * seasonId = null → глобальный зачёт (плюс ручные начисления администратора).
- */
 export function computeBoard(db: DB, seasonId: string | null): BoardRow[] {
   const acc = new Map<string, BoardRow>();
   const blank = (userId: string): BoardRow => ({
@@ -257,7 +232,7 @@ export function computeBoard(db: DB, seasonId: string | null): BoardRow[] {
   });
   for (const t of db.tournaments) {
     if (!t.results) continue;
-    if (t.nonScoring) continue; // финал сезона вне зачёта
+    if (t.nonScoring) continue;
     if (seasonId && t.seasonId !== seasonId) continue;
     for (const r of t.results) {
       let row = acc.get(r.userId);
@@ -286,7 +261,6 @@ export function computeBoard(db: DB, seasonId: string | null): BoardRow[] {
   return rows;
 }
 
-/** Предварительный порядок мест: оставшиеся — по времени чекина, выбывшие — в обратном порядке вылета. */
 export function provisionalResults(t: Tournament): Array<{ userId: string; place: number }> {
   const regAt = new Map<string, number>();
   for (const r of t.registrations) regAt.set(r.userId, r.checkedInAt ?? r.registeredAt);

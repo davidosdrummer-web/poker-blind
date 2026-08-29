@@ -1,3 +1,4 @@
+// src/pages/player.tsx
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -39,6 +40,12 @@ export default function PlayerCabinet() {
     });
   };
 
+  const handleLogout = async () => {
+    await actions.logout();
+    toast("До встречи за столом!", "info");
+    navigate("/");
+  };
+
   return (
     <div className={cx(light && "theme-light")}>
       <div className="bg-stage suit-pattern noise min-h-screen">
@@ -76,7 +83,7 @@ export default function PlayerCabinet() {
               </button>
               <Avatar name={fullName(user)} hue={user.hue} size={34} photo={user.photoURL} online />
               <button
-                onClick={() => { actions.logout(); toast("До встречи за столом!", "info"); navigate("/"); }}
+                onClick={handleLogout}
                 className="rounded-lg border border-ink-600 p-2 text-ink-300 transition-colors hover:border-danger-500/50 hover:text-danger-300"
                 title="Выйти"
               >
@@ -108,6 +115,7 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
   const [firstName, setFirstName] = useState(user.firstName);
   const [lastName, setLastName] = useState(user.lastName);
   const [phone, setPhone] = useState(user.phone);
+  const [isSaving, setIsSaving] = useState(false);
   const season = db.seasons.find((s) => s.isActive);
   const board = useMemo(() => computeBoard(db, season?.id ?? null), [db, season]);
   const me = board.find((b) => b.userId === user.id);
@@ -118,6 +126,40 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
   const history = db.tournaments
     .filter((t) => t.results?.some((r) => r.userId === user.id))
     .slice(0, 3);
+
+  const handleSaveProfile = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const err = await actions.updateProfile(user.id, {
+        nickname: nick,
+        firstName,
+        lastName,
+        phone,
+      });
+      if (err) {
+        toast(err, "err");
+      } else {
+        toast("Профиль обновлён", "ok");
+      }
+    } catch (error) {
+      toast("Ошибка при сохранении профиля", "err");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAvatarUpload = async (file: File) => {
+    const err = readAvatarFile(file, async (url) => {
+      try {
+        await actions.updateProfile(user.id, { photoURL: url });
+        toast("Аватар обновлён", "ok");
+      } catch {
+        toast("Ошибка загрузки аватара", "err");
+      }
+    });
+    if (err) toast(err, "err");
+  };
 
   return (
     <div className="space-y-6">
@@ -139,13 +181,14 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
               >
                 <Camera size={14} />
                 <input
-                  type="file" accept="image/*" className="hidden"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     e.target.value = "";
                     if (!f) return;
-                    const err = readAvatarFile(f, (url) => { actions.updateProfile(user.id, { photoURL: url }); toast("Аватар обновлён"); });
-                    if (err) toast(err, "err");
+                    handleAvatarUpload(f);
                   }}
                 />
               </label>
@@ -233,14 +276,8 @@ function OverviewTab({ user, db, goto }: { user: User; db: DB; goto: (t: string)
                   <Field label="Фамилия"><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></Field>
                 </div>
                 <Field label="Телефон"><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 ___ ___-__-__" /></Field>
-                <Button
-                  className="w-full"
-                  onClick={() => {
-                    const err = actions.updateProfile(user.id, { nickname: nick, firstName, lastName, phone });
-                    toast(err ?? "Профиль обновлён", err ? "err" : "ok");
-                  }}
-                >
-                  Сохранить профиль
+                <Button className="w-full" onClick={handleSaveProfile} disabled={isSaving}>
+                  {isSaving ? "Сохранение..." : "Сохранить профиль"}
                 </Button>
               </div>
             </Card>
@@ -296,11 +333,36 @@ function TournamentsTab({ user, db }: { user: User; db: DB }) {
   const mine = db.tournaments.filter((t) => t.registrations.some((r) => r.userId === user.id && r.status !== "refunded") && t.status === "registration");
   const history = db.tournaments.filter((t) => t.results?.some((r) => r.userId === user.id));
 
-  const register = (tId: string, name: string) => {
-    const err = actions.addRegistration(tId, user.id);
-    if (err) { toast(err, "err"); return; }
-    actions.pushNotice(user.id, `Вы записаны на «${name}» — не забудьте чекин до старта`, "info");
-    toast(`Вы в списке «${name}»`);
+  const handleRegister = async (tId: string, name: string) => {
+    try {
+      const err = await actions.addRegistration(tId, user.id);
+      if (err) {
+        toast(err, "err");
+        return;
+      }
+      await actions.pushNotice(user.id, `Вы записаны на «${name}» — не забудьте чекин до старта`, "info");
+      toast(`Вы в списке «${name}»`, "ok");
+    } catch (error) {
+      toast("Ошибка при записи на турнир", "err");
+    }
+  };
+
+  const handleToggleCheckIn = async (tId: string) => {
+    try {
+      await actions.toggleCheckIn(tId, user.id);
+      toast("Чекин выполнен — ждём за столом!", "ok");
+    } catch (error) {
+      toast("Ошибка при чекине", "err");
+    }
+  };
+
+  const handleRemoveRegistration = async (tId: string) => {
+    try {
+      await actions.removeRegistration(tId, user.id);
+      toast("Запись отменена", "info");
+    } catch (error) {
+      toast("Ошибка при отмене записи", "err");
+    }
   };
 
   return (
@@ -336,19 +398,31 @@ function TournamentsTab({ user, db }: { user: User; db: DB }) {
                 </div>
                 <div className="mt-4 border-t border-ink-700/70 pt-4">
                   {!myReg ? (
-                    <Button className="w-full" disabled={regs >= t.maxPlayers} onClick={() => register(t.id, t.name)}>
+                    <Button
+                      className="w-full"
+                      disabled={regs >= t.maxPlayers}
+                      onClick={() => handleRegister(t.id, t.name)}
+                    >
                       {regs >= t.maxPlayers ? "Мест нет" : "Записаться"}
                     </Button>
                   ) : (
                     <div className="flex gap-2">
                       {myReg.status === "registered" ? (
-                        <Button variant="felt" className="flex-1" onClick={() => { actions.toggleCheckIn(t.id, user.id); toast("Чекин выполнен — ждём за столом!"); }}>
+                        <Button
+                          variant="felt"
+                          className="flex-1"
+                          onClick={() => handleToggleCheckIn(t.id)}
+                        >
                           <CheckCircle2 size={15} /> Отметить присутствие
                         </Button>
                       ) : (
                         <Badge tone="felt" className="flex-1 justify-center py-2.5 text-sm">Вы записаны · чекин ✓</Badge>
                       )}
-                      <Button variant="ghost" onClick={() => { actions.removeRegistration(t.id, user.id); toast("Запись отменена", "info"); }} title="Отменить запись">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleRemoveRegistration(t.id)}
+                        title="Отменить запись"
+                      >
                         <XCircle size={16} />
                       </Button>
                     </div>

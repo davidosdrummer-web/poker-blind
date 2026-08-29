@@ -1,3 +1,4 @@
+// src/pages/playerStats.tsx
 import { useMemo, useState } from "react";
 import { Bell, CheckCheck, TrendingUp } from "lucide-react";
 import type { DB, User } from "../types";
@@ -188,6 +189,15 @@ export function NoticesTab({ user, db }: { user: User; db: DB }) {
   const marker = db.readMarkers[user.id] ?? 0;
   const unread = list.filter((n) => n.at > marker).length;
 
+  const handleMarkRead = async () => {
+    try {
+      await actions.markNoticesRead(user.id);
+      toast("Отмечено прочитанным", "info");
+    } catch (error) {
+      toast("Ошибка при отметке прочитанного", "err");
+    }
+  };
+
   return (
     <Card className="p-5">
       <SectionHead
@@ -195,7 +205,7 @@ export function NoticesTab({ user, db }: { user: User; db: DB }) {
         title="Уведомления"
         right={
           unread > 0 ? (
-            <Button size="sm" variant="dark" onClick={() => { actions.markNoticesRead(user.id); toast("Отмечено прочитанным", "info"); }}>
+            <Button size="sm" variant="dark" onClick={handleMarkRead}>
               <CheckCheck size={14} /> Прочитать всё ({unread})
             </Button>
           ) : <Bell size={16} className="text-ink-500" />

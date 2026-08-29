@@ -1,69 +1,40 @@
-import type {
-  AchievementDef, DB, DisplayCfg, Notice, RebuyKind, ResultEntry, Role, ScoringConfig, Season,
-  SeatAlgo, Template, Tournament, User,
-} from "../types";
-import { buildInitial } from "./seed";
+// src/lib/store.ts
+import { auth } from './firebase/config';
 import {
-  computeBoard, DEFAULT_ACHIEVEMENTS, emptyStats, freshAchievements, isLateRegOpen, itmCutoff,
-  levelDurationMs, levelRemainingMs, provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
-} from "./formulas";
+  login as firebaseLogin,
+  register as firebaseRegister,
+  logout as firebaseLogout,
+  onAuthState,
+} from './firebase/auth';
+import * as realtime from './firebase/realtime';
+import * as firestore from './firebase/firestore';
+import type {
+  User, DB, Tournament, Season, Template, Result, Rating,
+  AchievementDef, ClubSettings, DisplayCfg, Notice, RebuyKind, SeatAlgo,
+} from '../types';
+import {
+  computeBoard,
+  emptyStats,
+  freshAchievements,
+  isLateRegOpen,
+  itmCutoff,
+  levelDurationMs,
+  levelRemainingMs,
+  provisionalResults,
+  remainingCount,
+  scoreForPlace,
+  totalSeats,
+} from './formulas';
+import { uid, DEFAULT_ACHIEVEMENTS, defaultScoring, REBUY_LABELS } from './constants';
 
-/* ============================================================
-   Центральная БД клуба. Единое хранилище состояния: мутации
-   мгновенно разносятся по всем вкладкам через BroadcastChannel
-   (onValue-синхронность), персист — в localStorage.
-   Точка подмены на реальный Firebase — mutate()/load().
-   ============================================================ */
+// Re-экспорты для совместимости
+export { uid, DEFAULT_ACHIEVEMENTS, defaultScoring, REBUY_LABELS };
 
-const LS_KEY = "goldentuz_db_v7";
-const SS_KEY = "goldentuz_uid";
-const BC_NAME = "goldentuz_sync_v7";
+// ============================================================
+//  ЛОКАЛЬНОЕ СОСТОЯНИЕ (кэш)
+// ============================================================
 
-function isValid(db: unknown): db is DB {
-  const d = db as DB | null;
-  return !!d && d.v === 7
-    && Array.isArray(d.users)
-    && Array.isArray(d.tournaments) && Array.isArray(d.seasons)
-    && Array.isArray(d.achievements)
-    && !!d.settings && !!d.presence;
-}
-
-/** Достраивает поля, появившиеся в новых версиях схемы (без потери данных). */
-function normalize(d: DB): DB {
-  if (!Array.isArray(d.achievements) || d.achievements.length === 0) {
-    d.achievements = JSON.parse(JSON.stringify(DEFAULT_ACHIEVEMENTS));
-  }
-  const s = d.settings as Partial<DB["settings"]>;
-  if (!s.background) s.background = "#0a0a12";
-  if (s.soundsEnabled === undefined) s.soundsEnabled = true;
-  if (s.soundVolume === undefined) s.soundVolume = 70;
-  for (const u of d.users) {
-    if (u.cover === undefined || u.cover === null) u.cover = 0;
-    if (u.photoURL === undefined) u.photoURL = null;
-  }
-  for (const t of d.tournaments) {
-    if ((t as unknown as Record<string, unknown>).finalTableAt === undefined) t.finalTableAt = 9;
-  }
-  return d;
-}
-
-function load(): DB {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown;
-      if (isValid(parsed)) return normalize(parsed);
-    }
-  } catch { /* повреждённые данные — пересоздаём */ }
-  const initial = buildInitial();
-  try { localStorage.setItem(LS_KEY, JSON.stringify(initial)); } catch { /* quota */ }
-  return initial;
-}
-
-let state: DB = load();
-let sessionUid: string | null = null;
-try { sessionUid = sessionStorage.getItem(SS_KEY); } catch { sessionUid = null; }
-
+let state: DB = getEmptyDB();
 let version = 0;
 const listeners = new Set<() => void>();
 
@@ -72,98 +43,102 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 
-function persist() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch { /* quota */ }
-  try { channel?.postMessage("sync"); } catch { /* channel closed */ }
+function getEmptyDB(): DB {
+  return {
+    v: 7,
+    users: [],
+    seasons: [],
+    templates: [],
+    achievements: JSON.parse(JSON.stringify(DEFAULT_ACHIEVEMENTS)),
+    tournaments: [],
+    displays: [],
+    notices: [],
+    settings: {
+      clubName: 'Золотой Туз',
+      tagline: 'Спортивный покер-клуб · турниры, рейтинги, сезоны',
+      language: 'ru',
+      primary: '#d4a017',
+      background: '#0a0a12',
+      soundsEnabled: true,
+      soundVolume: 70,
+      defaultScoring: defaultScoring(),
+    },
+    presence: {},
+    readMarkers: {},
+  };
 }
 
-let channel: BroadcastChannel | null = null;
-try {
-  channel = new BroadcastChannel(BC_NAME);
-  channel.onmessage = (e) => {
-    if (e.data === "sync") {
-      try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as unknown;
-          if (isValid(parsed)) state = normalize(parsed);
-        }
-      } catch { /* ignore */ }
-      emit();
-    }
-  };
-} catch { channel = null; }
+// ============================================================
+//  ИНИЦИАЛИЗАЦИЯ ПОДПИСОК НА FIREBASE
+// ============================================================
 
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === LS_KEY && e.newValue) {
-      try {
-        const parsed = JSON.parse(e.newValue) as unknown;
-        if (isValid(parsed)) { state = normalize(parsed); emit(); }
-      } catch { /* ignore */ }
-    }
+let initialized = false;
+
+function initSubscriptions() {
+  if (initialized) return;
+  initialized = true;
+
+  firestore.users.subscribe((users) => {
+    state.users = users;
+    emit();
+  });
+
+  firestore.seasons.subscribe((seasons) => {
+    state.seasons = seasons;
+    emit();
+  });
+
+  firestore.templates.subscribe((templates) => {
+    state.templates = templates;
+    emit();
+  });
+
+  firestore.tournamentsMeta.subscribe((tournaments) => {
+    state.tournaments = tournaments;
+    emit();
+  });
+
+  firestore.achievements.subscribe((achievements) => {
+    state.achievements = achievements;
+    emit();
+  });
+
+  firestore.settings.subscribe((settings) => {
+    state.settings = settings;
+    emit();
+  });
+
+  firestore.displays.subscribe((displays) => {
+    state.displays = displays;
+    emit();
+  });
+
+  realtime.subscribePresence((presence) => {
+    state.presence = presence;
+    emit();
   });
 }
 
-function mutate(fn: (db: DB) => void) {
-  fn(state);
-  persist();
-  emit();
-}
+initSubscriptions();
 
-/* ---------------- подписка ---------------- */
-
-export function subscribeStore(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => { listeners.delete(fn); };
-}
-export function getVersion(): number { return version; }
-export function getState(): DB { return state; }
-export function getSessionUid(): string | null { return sessionUid; }
-
-function setSession(uidv: string | null) {
-  sessionUid = uidv;
-  try {
-    if (uidv) sessionStorage.setItem(SS_KEY, uidv);
-    else sessionStorage.removeItem(SS_KEY);
-  } catch { /* ignore */ }
-  emit();
-}
-
-/* ---------------- помощники ---------------- */
-
-function notice(db: DB, userId: string, text: string, kind: Notice["kind"] = "info") {
-  db.notices.unshift({ id: uid("n"), userId, text, at: Date.now(), kind });
-  if (db.notices.length > 80) db.notices.length = 80;
-}
+// ============================================================
+//  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ============================================================
 
 function findUser(db: DB, id: string): User | undefined {
   return db.users.find((u) => u.id === id);
 }
 
 function nicknameOf(db: DB, id: string): string {
-  return findUser(db, id)?.nickname ?? "—";
+  return findUser(db, id)?.nickname ?? '—';
 }
 
-function touchPresence(db: DB, userId: string, tournamentId: string | null = null) {
-  db.presence[userId] = {
-    status: "online",
-    lastSeen: Date.now(),
-    tournamentId: tournamentId ?? db.presence[userId]?.tournamentId ?? null,
-  };
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+function findTournament(db: DB, id: string): Tournament | undefined {
+  return db.tournaments.find((t) => t.id === id);
 }
 
 function isLive(t: Tournament | undefined): boolean {
-  return !!t && ["active", "break", "paused"].includes(t.status);
+  return !!t && ['active', 'break', 'paused'].includes(t.status);
 }
 
 function isEliminated(t: Tournament, userId: string): boolean {
@@ -178,647 +153,1069 @@ function findFreeSeat(t: Tournament): { table: number; seat: number } | null {
   return null;
 }
 
-/**
- * Общий финальный стол: когда за столами остаётся <= finalTableAt игроков,
- * все они сводятся за один стол (isFinal) — именно его показывает ТВ-экран «Финал».
- */
-function formFinalTableIfNeeded(db: DB, t: Tournament) {
-  if (t.finalTableAt <= 0) return;
-  if (t.tables.some((tb) => tb.isFinal)) return; // уже сформирован
-  const rem: string[] = [];
-  for (const tb of t.tables) for (const s of tb.seats) if (s) rem.push(s);
-  if (rem.length === 0 || rem.length > t.finalTableAt) return;
-  const seats: (string | null)[] = Array(t.finalTableAt).fill(null);
-  rem.forEach((u, i) => { seats[i] = u; });
-  t.tables = [{ number: 1, isFinal: true, capacity: t.finalTableAt, seats }];
-  notice(db, "all", `«${t.name}»: сформирован финальный стол — ${rem.length} ${rem.length === 1 ? "игрок" : "игроков"}`, "win");
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 function seasonPoints(db: DB, seasonId: string): Map<string, number> {
   const pts = new Map<string, number>();
-  for (const tt of db.tournaments) {
-    if (tt.seasonId !== seasonId || !tt.results) continue;
-    for (const r of tt.results) pts.set(r.userId, (pts.get(r.userId) ?? 0) + r.points);
+  for (const t of db.tournaments) {
+    if (t.seasonId !== seasonId || !t.results) continue;
+    for (const r of t.results) {
+      pts.set(r.userId, (pts.get(r.userId) ?? 0) + r.points);
+    }
   }
   return pts;
 }
 
-export const REBUY_LABELS: Record<RebuyKind, string> = {
-  rebuy: "Рабай", addon: "Аддон", reentry: "Ре-ентри", lastchance: "Ласт шанс",
-};
+function formFinalTableIfNeeded(db: DB, t: Tournament) {
+  if (t.finalTableAt <= 0) return;
+  if (t.tables.some((tb) => tb.isFinal)) return;
+  const rem: string[] = [];
+  for (const tb of t.tables) {
+    for (const s of tb.seats) {
+      if (s) rem.push(s);
+    }
+  }
+  if (rem.length === 0 || rem.length > t.finalTableAt) return;
+  const seats: (string | null)[] = Array(t.finalTableAt).fill(null);
+  rem.forEach((u, i) => {
+    seats[i] = u;
+  });
+  t.tables = [{ number: 1, isFinal: true, capacity: t.finalTableAt, seats }];
+  actions.pushNotice('all', `«${t.name}»: сформирован финальный стол — ${rem.length} ${rem.length === 1 ? 'игрок' : 'игроков'}`, 'win');
+}
 
-/* ============================================================
-   ДЕЙСТВИЯ
-   ============================================================ */
+function notice(db: DB, userId: string, text: string, kind: Notice['kind'] = 'info') {
+  firestore.notices.add({
+    userId,
+    text,
+    at: Date.now(),
+    kind,
+  });
+  db.notices.unshift({ id: uid('n'), userId, text, at: Date.now(), kind });
+  if (db.notices.length > 80) db.notices.length = 80;
+}
+
+// ============================================================
+//  АУТЕНТИФИКАЦИЯ
+// ============================================================
+
+let sessionUid: string | null = null;
+
+try {
+  sessionUid = sessionStorage.getItem('gt_uid');
+} catch {
+  sessionUid = null;
+}
+
+onAuthState(async (user) => {
+  if (user) {
+    sessionUid = user.uid;
+    try {
+      sessionStorage.setItem('gt_uid', user.uid);
+    } catch {}
+    realtime.setPresence(user.uid, null);
+    emit();
+  } else {
+    sessionUid = null;
+    try {
+      sessionStorage.removeItem('gt_uid');
+    } catch {}
+    emit();
+  }
+});
+
+// ============================================================
+//  ACTIONS
+// ============================================================
 
 export const actions = {
-  /* ---------- аутентификация и профили ---------- */
+  // ---------- Аутентификация ----------
+  async login(email: string, password: string): Promise<string | null> {
+    const { user, error } = await firebaseLogin(email, password);
+    if (error) return error;
+    if (!user) return 'Ошибка входа';
 
-  login(email: string, password: string): string | null {
-    const u = state.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
-    if (!u) return "Пользователь с таким email не найден";
-    if (u.password !== password) return "Неверный пароль";
-    if (u.isBlocked) return "Аккаунт заблокирован администратором";
-    setSession(u.id);
-    mutate((db) => touchPresence(db, u.id, null));
+    const profile = await firestore.users.get(user.uid);
+    if (!profile) return 'Пользователь не найден в базе клуба';
+    if (profile.isBlocked) return 'Аккаунт заблокирован администратором';
+
+    sessionUid = user.uid;
+    try {
+      sessionStorage.setItem('gt_uid', user.uid);
+    } catch {}
+
+    realtime.setPresence(user.uid, null);
     return null;
   },
 
-  /** Самостоятельная регистрация игрока (страница входа). */
-  register(opts: { email: string; password: string; firstName: string; lastName: string; nickname: string; phone: string }): string | null {
-    const em = opts.email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return "Некорректный email";
-    if (opts.password.length < 6) return "Пароль — минимум 6 символов";
-    if (!opts.firstName.trim() || !opts.lastName.trim() || !opts.nickname.trim()) return "Заполните имя, фамилию и никнейм";
-    if (state.users.some((x) => x.email.toLowerCase() === em)) return "Этот email уже зарегистрирован";
-    const id = uid("u");
-    // Боевой bootstrap: первый аккаунт в пустой базе становится администратором клуба
-    const isFirst = state.users.length === 0;
-    mutate((db) => {
-      db.users.push({
-        id, email: em, password: opts.password,
-        firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
-        nickname: opts.nickname.trim(), phone: opts.phone.trim(),
-        role: isFirst ? "admin" : "player",
-        hue: Math.floor(Math.random() * 360), photoURL: null,
-        cover: Math.floor(Math.random() * 6),
-        registeredAt: Date.now(), isBlocked: false, archived: false, manualPoints: 0,
-        stats: emptyStats(), achievements: [],
-      });
-      touchPresence(db, id);
-      if (isFirst) notice(db, "all", `Клуб основан: ${opts.nickname.trim()} — администратор платформы`, "win");
-      else notice(db, "all", `В клубе новый игрок — ${opts.nickname.trim()}!`, "info");
-    });
-    setSession(id);
-    return null;
-  },
+  async register(opts: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    nickname: string;
+    phone: string;
+  }): Promise<string | null> {
+    const { user, error } = await firebaseRegister(opts.email, opts.password);
+    if (error) return error;
+    if (!user) return 'Ошибка регистрации';
 
-  /** Создание учётной записи администратором — попадает в общую базу клуба. */
-  createPlayer(opts: {
-    email: string; password: string; firstName: string; lastName: string; nickname: string;
-    phone: string; hue: number; registeredAt: number; manualPoints: number; photoURL?: string | null;
-  }): string | null {
-    const em = opts.email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return "Некорректный email";
-    if (opts.password.length < 6) return "Пароль — минимум 6 символов";
-    if (!opts.firstName.trim() || !opts.lastName.trim() || !opts.nickname.trim()) return "Заполните имя, фамилию и никнейм";
-    if (state.users.some((x) => x.email.toLowerCase() === em)) return "Этот email уже занят";
-    const id = uid("u");
-    mutate((db) => {
-      db.users.push({
-        id, email: em, password: opts.password,
-        firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
-        nickname: opts.nickname.trim(), phone: opts.phone.trim(),
-        role: "player", hue: opts.hue, photoURL: opts.photoURL ?? null,
-        cover: Math.floor(Math.random() * 6),
-        registeredAt: opts.registeredAt || Date.now(),
-        isBlocked: false, archived: false,
-        manualPoints: Math.max(0, Math.round(opts.manualPoints || 0)),
-        stats: emptyStats(), achievements: [],
-      });
-    });
-    return null;
-  },
+    const existingUsers = await firestore.users.query([]);
+    const isFirst = existingUsers.length === 0;
 
-  logout() {
-    const cur = sessionUid;
-    if (cur) {
-      mutate((db) => {
-        if (db.presence[cur]) db.presence[cur] = { ...db.presence[cur], status: "offline", lastSeen: Date.now() };
-      });
+    const userData: Omit<User, 'id'> = {
+      email: opts.email.trim().toLowerCase(),
+      password: opts.password,
+      firstName: opts.firstName.trim(),
+      lastName: opts.lastName.trim(),
+      nickname: opts.nickname.trim(),
+      phone: opts.phone.trim(),
+      role: isFirst ? 'admin' : 'player',
+      hue: Math.floor(Math.random() * 360),
+      photoURL: null,
+      cover: Math.floor(Math.random() * 6),
+      registeredAt: Date.now(),
+      isBlocked: false,
+      archived: false,
+      manualPoints: 0,
+      stats: emptyStats(),
+      achievements: [],
+    };
+
+    await firestore.users.set(user.uid, userData);
+
+    sessionUid = user.uid;
+    try {
+      sessionStorage.setItem('gt_uid', user.uid);
+    } catch {}
+
+    realtime.setPresence(user.uid, null);
+
+    if (isFirst) {
+      notice(state, 'all', `Клуб основан: ${opts.nickname.trim()} — администратор платформы`, 'win');
+    } else {
+      notice(state, 'all', `В клубе новый игрок — ${opts.nickname.trim()}!`, 'info');
     }
-    setSession(null);
+
+    return null;
+  },
+
+  async createPlayer(opts: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    nickname: string;
+    phone: string;
+    hue: number;
+    registeredAt: number;
+    manualPoints: number;
+    photoURL?: string | null;
+  }): Promise<string | null> {
+    const { user, error } = await firebaseRegister(opts.email, opts.password);
+    if (error) return error;
+    if (!user) return 'Ошибка создания пользователя';
+
+    const userData: Omit<User, 'id'> = {
+      email: opts.email.trim().toLowerCase(),
+      password: opts.password,
+      firstName: opts.firstName.trim(),
+      lastName: opts.lastName.trim(),
+      nickname: opts.nickname.trim(),
+      phone: opts.phone.trim(),
+      role: 'player',
+      hue: opts.hue,
+      photoURL: opts.photoURL ?? null,
+      cover: Math.floor(Math.random() * 6),
+      registeredAt: opts.registeredAt || Date.now(),
+      isBlocked: false,
+      archived: false,
+      manualPoints: Math.max(0, Math.round(opts.manualPoints || 0)),
+      stats: emptyStats(),
+      achievements: [],
+    };
+
+    await firestore.users.set(user.uid, userData);
+    return null;
+  },
+
+  async logout() {
+    await firebaseLogout();
+    sessionUid = null;
+    try {
+      sessionStorage.removeItem('gt_uid');
+    } catch {}
   },
 
   resetPassword(email: string): string | null {
-    const u = state.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
-    if (!u) return "Пользователь не найден";
     return null;
   },
 
   heartbeat(userId: string, tournamentId: string | null = null) {
-    mutate((db) => touchPresence(db, userId, tournamentId));
+    realtime.updatePresence(userId, tournamentId);
   },
 
-  updateProfile(userId: string, patch: Partial<Pick<User, "firstName" | "lastName" | "nickname" | "phone" | "hue" | "photoURL" | "cover">>): string | null {
-    if (patch.nickname !== undefined && !patch.nickname.trim()) return "Никнейм не может быть пустым";
-    mutate((db) => {
-      const u = findUser(db, userId);
-      if (u) Object.assign(u, patch);
-    });
+  async updateProfile(userId: string, patch: Partial<Pick<User, 'firstName' | 'lastName' | 'nickname' | 'phone' | 'hue' | 'photoURL' | 'cover'>>): Promise<string | null> {
+    if (patch.nickname !== undefined && !patch.nickname.trim()) {
+      return 'Никнейм не может быть пустым';
+    }
+    await firestore.users.update(userId, patch);
     return null;
   },
 
-  setRole(userId: string, role: Role) {
-    mutate((db) => { const u = findUser(db, userId); if (u) u.role = role; });
+  async setRole(userId: string, role: User['role']) {
+    await firestore.users.update(userId, { role });
   },
 
-  setBlocked(userId: string, blocked: boolean) {
-    mutate((db) => { const u = findUser(db, userId); if (u) u.isBlocked = blocked; });
+  async setBlocked(userId: string, blocked: boolean) {
+    await firestore.users.update(userId, { isBlocked: blocked });
   },
 
-  setArchived(userId: string, archived: boolean) {
-    mutate((db) => { const u = findUser(db, userId); if (u) u.archived = archived; });
+  async setArchived(userId: string, archived: boolean) {
+    await firestore.users.update(userId, { archived });
   },
 
-  setManualPoints(userId: string, points: number) {
-    mutate((db) => {
-      const u = findUser(db, userId);
-      if (u) {
-        u.manualPoints = Math.max(0, Math.round(points));
-        if (u.manualPoints > 0) notice(db, userId, `Администратор начислил вам ${u.manualPoints} очков`, "win");
+  async setManualPoints(userId: string, points: number) {
+    const pts = Math.max(0, Math.round(points));
+    await firestore.users.update(userId, { manualPoints: pts });
+    if (pts > 0) {
+      const user = state.users.find((u) => u.id === userId);
+      if (user) {
+        notice(state, userId, `Администратор начислил вам ${pts} очков`, 'win');
       }
-    });
+    }
   },
 
-  /* ---------- сезоны ---------- */
-
-  saveSeason(season: Season) {
-    mutate((db) => {
-      if (season.isActive) db.seasons.forEach((x) => { if (x.id !== season.id) x.isActive = false; });
-      const i = db.seasons.findIndex((x) => x.id === season.id);
-      if (i >= 0) db.seasons[i] = season; else db.seasons.push(season);
-    });
+  // ---------- Сезоны ----------
+  async saveSeason(season: Season) {
+    if (season.isActive) {
+      for (const s of state.seasons) {
+        if (s.id !== season.id && s.isActive) {
+          await firestore.seasons.set(s.id, { ...s, isActive: false });
+        }
+      }
+    }
+    await firestore.seasons.set(season.id, season);
   },
 
-  archiveSeason(id: string) {
-    mutate((db) => {
-      const x = db.seasons.find((q) => q.id === id);
-      if (x) { x.archived = true; x.isActive = false; }
-    });
+  async archiveSeason(id: string) {
+    const season = state.seasons.find((s) => s.id === id);
+    if (season) {
+      await firestore.seasons.set(id, { ...season, archived: true, isActive: false });
+    }
   },
 
-  deleteSeason(id: string): string | null {
-    if (state.tournaments.some((t) => t.seasonId === id)) return "В сезоне есть турниры — сначала перенесите их";
-    mutate((db) => { db.seasons = db.seasons.filter((x) => x.id !== id); });
+  async deleteSeason(id: string): Promise<string | null> {
+    if (state.tournaments.some((t) => t.seasonId === id)) {
+      return 'В сезоне есть турниры — сначала перенесите их';
+    }
+    await firestore.seasons.delete(id);
     return null;
   },
 
-  /* ---------- шаблоны ---------- */
-
-  saveTemplate(tpl: Template) {
-    mutate((db) => {
-      const i = db.templates.findIndex((x) => x.id === tpl.id);
-      if (i >= 0) db.templates[i] = tpl; else db.templates.push(tpl);
-    });
+  // ---------- Шаблоны ----------
+  async saveTemplate(tpl: Template) {
+    await firestore.templates.set(tpl.id, tpl);
   },
 
-  duplicateTemplate(id: string): string | null {
+  async duplicateTemplate(id: string): Promise<string | null> {
     const src = state.templates.find((t) => t.id === id);
-    if (!src) return "Шаблон не найден";
-    const copy: Template = { ...JSON.parse(JSON.stringify(src)), id: uid("tpl"), name: `${src.name} (копия)` };
-    mutate((db) => db.templates.push(copy));
+    if (!src) return 'Шаблон не найден';
+    const copy: Template = {
+      ...JSON.parse(JSON.stringify(src)),
+      id: uid('tpl'),
+      name: `${src.name} (копия)`,
+    };
+    await firestore.templates.set(copy.id, copy);
     return null;
   },
 
-  deleteTemplate(id: string) {
-    mutate((db) => { db.templates = db.templates.filter((t) => t.id !== id); });
+  async deleteTemplate(id: string) {
+    await firestore.templates.delete(id);
   },
 
-  /* ---------- турниры ---------- */
+  // ---------- Турниры ----------
+  async createTournament(draft: Omit<Tournament, 'id' | 'createdBy' | 'createdAt' | 'status'>): Promise<string> {
+    const id = uid('tr');
+    const tournament: Tournament = {
+      ...draft,
+      id,
+      status: 'registration',
+      createdBy: sessionUid ?? 'u_admin',
+      createdAt: Date.now(),
+    };
 
-  /** Создание из черновика конструктора. Возвращает id. */
-  createTournament(draft: Tournament): string {
-    const id = uid("tr");
-    mutate((db) => {
-      db.tournaments.unshift({ ...draft, id, status: "registration", createdBy: sessionUid ?? "u_admin", createdAt: Date.now() });
-      notice(db, "all", `Открыта регистрация: «${draft.name}»`, "info");
+    await firestore.tournamentsMeta.set(id, tournament);
+
+    await realtime.initTournamentState(id, {
+      status: 'registration',
+      currentLevel: 0,
+      levelStartedAt: null,
+      pausedRemaining: null,
+      breakEndsAt: null,
+      lateRegUntil: null,
+      tables: draft.tables || [],
+      knockouts: [],
+      rebuys: [],
+      bonuses: [],
+      playersCount: 0,
+      averageStack: 0,
     });
+
+    notice(state, 'all', `Открыта регистрация: «${draft.name}»`, 'info');
     return id;
   },
 
-  updateTournament(t: Tournament) {
-    mutate((db) => {
-      const i = db.tournaments.findIndex((x) => x.id === t.id);
-      if (i >= 0) db.tournaments[i] = t;
-    });
+  async updateTournament(t: Tournament) {
+    await firestore.tournamentsMeta.set(t.id, t);
   },
 
-  deleteTournament(id: string): string | null {
-    const t = state.tournaments.find((x) => x.id === id);
-    if (!t) return "Турнир не найден";
-    if (isLive(t)) return "Нельзя удалить идущий турнир";
-    mutate((db) => { db.tournaments = db.tournaments.filter((x) => x.id !== id); });
+  async deleteTournament(id: string): Promise<string | null> {
+    const t = findTournament(state, id);
+    if (!t) return 'Турнир не найден';
+    if (isLive(t)) return 'Нельзя удалить идущий турнир';
+
+    await firestore.tournamentsMeta.delete(id);
+    await realtime.deleteTournamentState(id);
     return null;
   },
 
-  setRegOpen(id: string, open: boolean) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === id);
-      if (t && t.status !== "finished") t.regOpen = open;
-    });
+  async setRegOpen(id: string, open: boolean) {
+    const t = findTournament(state, id);
+    if (t && t.status !== 'finished') {
+      await firestore.tournamentsMeta.update(id, { regOpen: open });
+    }
   },
 
-  addRegistration(tId: string, userId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.status === "finished") return "Турнир завершён";
-    if (!t.regOpen && t.status !== "registration") return "Регистрация закрыта";
-    if (t.registrations.some((r) => r.userId === userId && r.status !== "refunded")) return "Игрок уже в списке";
-    const active = t.registrations.filter((r) => r.status !== "refunded").length;
-    if (active >= t.maxPlayers) return "Турнир заполнен";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      tt.registrations.push({ userId, status: "registered", registeredAt: Date.now(), checkedInAt: null });
-    });
+  async addRegistration(tId: string, userId: string): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (t.status === 'finished') return 'Турнир завершён';
+    if (!t.regOpen && t.status !== 'registration') return 'Регистрация закрыта';
+    if (t.registrations.some((r) => r.userId === userId && r.status !== 'refunded')) {
+      return 'Игрок уже в списке';
+    }
+    const active = t.registrations.filter((r) => r.status !== 'refunded').length;
+    if (active >= t.maxPlayers) return 'Турнир заполнен';
+
+    const registrations = [
+      ...t.registrations,
+      { userId, status: 'registered' as const, registeredAt: Date.now(), checkedInAt: null },
+    ];
+    await firestore.tournamentsMeta.update(tId, { registrations });
     return null;
   },
 
-  removeRegistration(tId: string, userId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t) return;
-      t.registrations = t.registrations.filter((r) => r.userId !== userId);
-      for (const tb of t.tables) {
-        const i = tb.seats.indexOf(userId);
-        if (i >= 0) tb.seats[i] = null;
+  async removeRegistration(tId: string, userId: string) {
+    const t = findTournament(state, tId);
+    if (!t) return;
+    const registrations = t.registrations.filter((r) => r.userId !== userId);
+    await firestore.tournamentsMeta.update(tId, { registrations });
+
+    const stateData = await realtime.getTournamentState(tId);
+    if (stateData?.tables) {
+      const tables = stateData.tables.map((tb: any) => ({
+        ...tb,
+        seats: tb.seats.map((s: string | null) => (s === userId ? null : s)),
+      }));
+      await realtime.updateTournamentState(tId, { tables });
+    }
+  },
+
+  async toggleCheckIn(tId: string, userId: string) {
+    const t = findTournament(state, tId);
+    if (!t) return;
+    const registrations = t.registrations.map((r) => {
+      if (r.userId === userId) {
+        return {
+          ...r,
+          status: r.status === 'checked-in' ? 'registered' : 'checked-in',
+          checkedInAt: r.status === 'checked-in' ? null : Date.now(),
+        };
       }
+      return r;
     });
+    await firestore.tournamentsMeta.update(tId, { registrations });
   },
 
-  toggleCheckIn(tId: string, userId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      const r = t?.registrations.find((q) => q.userId === userId);
-      if (!r) return;
-      if (r.status === "checked-in") { r.status = "registered"; r.checkedInAt = null; }
-      else { r.status = "checked-in"; r.checkedInAt = Date.now(); }
-    });
-  },
+  // ---------- Рассадка ----------
+  async autoSeat(tId: string, algo: SeatAlgo): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (t.status !== 'registration') return 'Рассадка возможна до старта';
+    if (!t.tables.length) return 'Сначала добавьте столы в разделе «Столы»';
 
-  /* ---------- рассадка ---------- */
-
-  autoSeat(tId: string, algo: SeatAlgo): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.status !== "registration") return "Рассадка возможна до старта";
-    if (!t.tables.length) return "Сначала добавьте столы в разделе «Столы»";
-    const regs = t.registrations.filter((r) => r.status !== "refunded");
+    const regs = t.registrations.filter((r) => r.status !== 'refunded');
     let pool = regs.map((r) => r.userId);
-    const checked = regs.filter((r) => r.status === "checked-in").map((r) => r.userId);
+    const checked = regs.filter((r) => r.status === 'checked-in').map((r) => r.userId);
     if (checked.length >= 2) pool = checked;
-    if (pool.length < 2) return "Нужно минимум 2 участника с чекином";
-    if (totalSeats(t) < pool.length) return "Не хватает мест: добавьте столы или места";
-    if (algo === "rating") {
+    if (pool.length < 2) return 'Нужно минимум 2 участника с чекином';
+    if (totalSeats(t) < pool.length) return 'Не хватает мест: добавьте столы или места';
+
+    if (algo === 'rating') {
       const pts = seasonPoints(state, t.seasonId);
       pool = [...pool].sort((a, b) => (pts.get(b) ?? 0) - (pts.get(a) ?? 0));
     } else {
       pool = shuffle(pool);
     }
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      for (const tb of tt.tables) tb.seats = tb.seats.map((): string | null => null);
-      pool.forEach((userId, i) => {
-        let tableIdx: number;
-        if (algo === "rating") {
-          const n = tt.tables.length;
-          const round = Math.floor(i / n);
-          const pos = i % n;
-          tableIdx = round % 2 === 0 ? pos : n - 1 - pos;
-        } else {
-          const counts = tt.tables.map((tb) => tb.seats.filter(Boolean).length);
-          tableIdx = counts.indexOf(Math.min(...counts));
-        }
-        const tb = tt.tables[tableIdx];
-        const seatIdx = tb.seats.indexOf(null);
-        if (seatIdx >= 0) tb.seats[seatIdx] = userId;
-      });
-    });
-    return null;
-  },
 
-  moveSeat(tId: string, fromT: number, fromS: number, toT: number, toS: number) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t) return;
-      const a = t.tables.find((x) => x.number === fromT);
-      const b = t.tables.find((x) => x.number === toT);
-      if (!a || !b) return;
-      const tmp = a.seats[fromS];
-      a.seats[fromS] = b.seats[toS];
-      b.seats[toS] = tmp;
-    });
-  },
+    const tables = t.tables.map((tb) => ({
+      ...tb,
+      seats: tb.seats.map(() => null as string | null),
+    }));
 
-  balanceTables(tId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t || !t.tables.length) return "Нет столов";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      for (let guard = 0; guard < 100; guard += 1) {
-        const counts = tt.tables.map((tb) => tb.seats.filter(Boolean).length);
-        const maxI = counts.indexOf(Math.max(...counts));
-        const minI = counts.indexOf(Math.min(...counts));
-        if (counts[maxI] - counts[minI] <= 1) break;
-        const from = tt.tables[maxI];
-        const to = tt.tables[minI];
-        const sIdx = from.seats.findIndex(Boolean);
-        const tIdx = to.seats.findIndex((s) => s === null);
-        if (sIdx < 0 || tIdx < 0) break;
-        to.seats[tIdx] = from.seats[sIdx];
-        from.seats[sIdx] = null;
+    pool.forEach((userId, i) => {
+      let tableIdx: number;
+      if (algo === 'rating') {
+        const n = tables.length;
+        const round = Math.floor(i / n);
+        const pos = i % n;
+        tableIdx = round % 2 === 0 ? pos : n - 1 - pos;
+      } else {
+        const counts = tables.map((tb) => tb.seats.filter(Boolean).length);
+        tableIdx = counts.indexOf(Math.min(...counts));
       }
+      const tb = tables[tableIdx];
+      const seatIdx = tb.seats.indexOf(null);
+      if (seatIdx >= 0) tb.seats[seatIdx] = userId;
     });
+
+    await realtime.updateTournamentState(tId, { tables });
     return null;
   },
 
-  /* ---------- ход игры (одновременно идёт ОДИН турнир) ---------- */
+  async moveSeat(tId: string, fromT: number, fromS: number, toT: number, toS: number) {
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData?.tables) return;
 
-  startTournament(tId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.status !== "registration") return "Турнир уже запущен";
-    const other = state.tournaments.find((x) => x.id !== tId && isLive(x));
-    if (other) return `Сейчас идёт «${other.name}» — одновременно возможен только один турнир`;
-    if (!t.tables.length) {
-      const err = actions.autoSeat(tId, "balanced");
-      if (err) return err;
+    const tables = stateData.tables.map((tb: any) => ({ ...tb }));
+    const a = tables.find((tb: any) => tb.number === fromT);
+    const b = tables.find((tb: any) => tb.number === toT);
+    if (!a || !b) return;
+
+    const tmp = a.seats[fromS];
+    a.seats[fromS] = b.seats[toS];
+    b.seats[toS] = tmp;
+
+    await realtime.updateTournamentState(tId, { tables });
+  },
+
+  async balanceTables(tId: string): Promise<string | null> {
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData?.tables) return 'Нет столов';
+
+    const tables = stateData.tables.map((tb: any) => ({ ...tb }));
+
+    for (let guard = 0; guard < 100; guard++) {
+      const counts = tables.map((tb: any) => tb.seats.filter(Boolean).length);
+      const maxI = counts.indexOf(Math.max(...counts));
+      const minI = counts.indexOf(Math.min(...counts));
+      if (counts[maxI] - counts[minI] <= 1) break;
+
+      const from = tables[maxI];
+      const to = tables[minI];
+      const sIdx = from.seats.findIndex(Boolean);
+      const tIdx = to.seats.findIndex((s: string | null) => s === null);
+      if (sIdx < 0 || tIdx < 0) break;
+
+      to.seats[tIdx] = from.seats[sIdx];
+      from.seats[sIdx] = null;
     }
+
+    await realtime.updateTournamentState(tId, { tables });
+    return null;
+  },
+
+  // ---------- Ход игры ----------
+  async startTournament(tId: string): Promise<string | null> {
+    console.log('🔵 startTournament() вызвана для', tId);
+    
+    const t = findTournament(state, tId);
+    if (!t) {
+      console.error('❌ Турнир не найден');
+      return 'Турнир не найден';
+    }
+    
+    if (t.status !== 'registration') {
+      console.error('❌ Турнир уже запущен, статус:', t.status);
+      return 'Турнир уже запущен';
+    }
+
+    // Проверяем, нет ли другого активного турнира
+    const other = state.tournaments.find((x) => x.id !== tId && isLive(x));
+    if (other) {
+      console.error('❌ Активный турнир уже есть:', other.name);
+      return `Сейчас идёт «${other.name}» — одновременно возможен только один турнир`;
+    }
+
+    // Проверяем наличие игроков с чекином
+    const checkedIn = t.registrations.filter(r => r.status === 'checked-in');
+    if (checkedIn.length < 2) {
+      console.error('❌ Недостаточно игроков с чекином:', checkedIn.length);
+      return `Нужно минимум 2 игрока с чекином. Сейчас: ${checkedIn.length}`;
+    }
+
+    // Если нет столов, пробуем авторассадку
+    if (!t.tables || t.tables.length === 0) {
+      console.log('🔵 Столов нет, создаём...');
+      const err = await actions.autoSeat(tId, 'balanced');
+      if (err) {
+        console.error('❌ Ошибка авторассадки:', err);
+        return err;
+      }
+      console.log('✅ Авторассадка выполнена');
+    }
+
+    // Проверяем, что игроки рассажены
+    const updatedT = findTournament(state, tId);
+    const seated = updatedT?.tables?.reduce((sum, tb) => sum + tb.seats.filter(Boolean).length, 0) || 0;
+    if (seated < 2) {
+      console.error('❌ Игроки не рассажены, за столами:', seated);
+      return 'Игроки не рассажены. Сделайте авторассадку.';
+    }
+
     const now = Date.now();
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      tt.status = "active";
-      tt.currentLevel = 0;
-      tt.levelStartedAt = now;
-      tt.lateRegUntil = tt.lateRegMinutes > 0 ? now + tt.lateRegMinutes * 60_000 : null;
-      notice(db, "all", `Турнир «${tt.name}» стартовал — фишки в игре`, "alert");
-      if (tt.lateRegMinutes > 0) notice(db, "all", `Поздняя регистрация на «${tt.name}» открыта ${tt.lateRegMinutes} мин`, "info");
-    });
+    const lateRegUntil = t.lateRegMinutes > 0 ? now + t.lateRegMinutes * 60000 : null;
+
+    console.log('🔵 Запускаем турнир...');
+    
+    try {
+      await realtime.updateTournamentState(tId, {
+        status: 'active',
+        currentLevel: 0,
+        levelStartedAt: now,
+        lateRegUntil,
+        pausedRemaining: null,
+        breakEndsAt: null,
+      });
+      console.log('✅ Состояние обновлено в Realtime DB');
+    } catch (error) {
+      console.error('❌ Ошибка обновления Realtime DB:', error);
+      return 'Ошибка при запуске турнира';
+    }
+
+    try {
+      await firestore.tournamentsMeta.update(tId, { 
+        status: 'active',
+        currentLevel: 0,
+        levelStartedAt: now,
+      });
+      console.log('✅ Метаданные обновлены в Firestore');
+    } catch (error) {
+      console.error('❌ Ошибка обновления Firestore:', error);
+      return 'Ошибка при обновлении метаданных';
+    }
+
+    notice(state, 'all', `Турнир «${t.name}» стартовал — фишки в игре`, 'alert');
+    if (t.lateRegMinutes > 0) {
+      notice(state, 'all', `Поздняя регистрация на «${t.name}» открыта ${t.lateRegMinutes} мин`, 'info');
+    }
+
+    console.log('✅ Турнир успешно запущен!');
     return null;
   },
 
-  pauseTournament(tId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || t.status !== "active") return;
-      t.pausedRemaining = levelRemainingMs(t, Date.now());
-      t.levelStartedAt = null;
-      t.status = "paused";
+  async pauseTournament(tId: string) {
+    const t = findTournament(state, tId);
+    if (!t || t.status !== 'active') return;
+
+    const now = Date.now();
+    const rem = levelRemainingMs(t, now);
+
+    await realtime.updateTournamentState(tId, {
+      status: 'paused',
+      pausedRemaining: rem,
+      levelStartedAt: null,
     });
+
+    await firestore.tournamentsMeta.update(tId, { status: 'paused' });
   },
 
-  resumeTournament(tId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || t.status !== "paused") return;
-      const dur = levelDurationMs(t);
-      const rem = t.pausedRemaining ?? dur;
-      t.levelStartedAt = Date.now() - (dur - rem);
-      t.pausedRemaining = null;
-      t.status = "active";
+  async resumeTournament(tId: string) {
+    const t = findTournament(state, tId);
+    if (!t || t.status !== 'paused') return;
+
+    const dur = levelDurationMs(t);
+    const rem = t.pausedRemaining ?? dur;
+    const now = Date.now();
+
+    await realtime.updateTournamentState(tId, {
+      status: 'active',
+      levelStartedAt: now - (dur - rem),
+      pausedRemaining: null,
     });
+
+    await firestore.tournamentsMeta.update(tId, { status: 'active' });
   },
 
-  adjustTimer(tId: string, deltaSec: number): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (!isLive(t)) return "Таймер идёт только во время игры";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      const now = Date.now();
-      const dur = levelDurationMs(tt);
-      if (tt.status === "break" && tt.breakEndsAt != null) {
-        tt.breakEndsAt = Math.max(now, tt.breakEndsAt + deltaSec * 1000);
-      } else if (tt.status === "paused" && tt.pausedRemaining != null) {
-        tt.pausedRemaining = Math.min(dur, Math.max(0, tt.pausedRemaining + deltaSec * 1000));
-      } else if (tt.status === "active" && tt.levelStartedAt != null) {
-        const rem = Math.max(0, dur - (now - tt.levelStartedAt));
-        const newRem = Math.min(dur, Math.max(0, rem + deltaSec * 1000));
-        tt.levelStartedAt = now - (dur - newRem);
-      }
-    });
+  async adjustTimer(tId: string, deltaSec: number): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (!isLive(t)) return 'Таймер идёт только во время игры';
+
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData) return 'Состояние не найдено';
+
+    const now = Date.now();
+    const dur = levelDurationMs(t);
+
+    if (t.status === 'break' && t.breakEndsAt != null) {
+      await realtime.updateTournamentState(tId, {
+        breakEndsAt: Math.max(now, t.breakEndsAt + deltaSec * 1000),
+      });
+    } else if (t.status === 'paused' && t.pausedRemaining != null) {
+      const newRem = Math.min(dur, Math.max(0, t.pausedRemaining + deltaSec * 1000));
+      await realtime.updateTournamentState(tId, { pausedRemaining: newRem });
+    } else if (t.status === 'active' && t.levelStartedAt != null) {
+      const rem = Math.max(0, dur - (now - t.levelStartedAt));
+      const newRem = Math.min(dur, Math.max(0, rem + deltaSec * 1000));
+      await realtime.updateTournamentState(tId, {
+        levelStartedAt: now - (dur - newRem),
+      });
+    }
+
     return null;
   },
 
-  adjustLateReg(tId: string, deltaMin: number) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || !isLive(t)) return;
-      const now = Date.now();
-      const base = t.lateRegUntil != null && t.lateRegUntil > now ? t.lateRegUntil : now;
-      t.lateRegUntil = Math.max(0, base + deltaMin * 60_000);
-      if (t.lateRegUntil < now) notice(db, "all", `«${t.name}»: поздняя регистрация закрыта`, "info");
-    });
+  async adjustLateReg(tId: string, deltaMin: number) {
+    const t = findTournament(state, tId);
+    if (!t || !isLive(t)) return;
+
+    const now = Date.now();
+    const current = t.lateRegUntil != null && t.lateRegUntil > now ? t.lateRegUntil : now;
+    const newUntil = Math.max(0, current + deltaMin * 60000);
+
+    await realtime.updateTournamentState(tId, { lateRegUntil: newUntil });
+
+    if (newUntil < now) {
+      notice(state, 'all', `«${t.name}»: поздняя регистрация закрыта`, 'info');
+    }
   },
 
-  nextLevel(tId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.currentLevel >= t.levels.length - 1) return "Это последний уровень структуры";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      tt.currentLevel += 1;
-      tt.levelStartedAt = Date.now();
-      tt.pausedRemaining = null;
-      if (tt.status === "break" || tt.status === "paused") {
-        tt.status = "active";
-        tt.breakEndsAt = null;
-      }
-      const br = tt.breaks.find((b) => b.afterLevel === tt.currentLevel);
-      if (br && tt.status === "active") {
-        tt.pausedRemaining = levelDurationMs(tt);
-        tt.status = "break";
-        tt.breakEndsAt = Date.now() + br.duration * 60_000;
-        tt.levelStartedAt = null;
-        notice(db, "all", `«${tt.name}»: перерыв ${br.duration} мин`, "info");
-      }
-    });
+  async nextLevel(tId: string): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (t.currentLevel >= t.levels.length - 1) return 'Это последний уровень структуры';
+
+    const newLevel = t.currentLevel + 1;
+    const now = Date.now();
+
+    const br = t.breaks.find((b) => b.afterLevel === newLevel);
+
+    const updateData: any = {
+      currentLevel: newLevel,
+      levelStartedAt: now,
+      pausedRemaining: null,
+    };
+
+    if (br) {
+      updateData.status = 'break';
+      updateData.breakEndsAt = now + br.duration * 60000;
+      updateData.levelStartedAt = null;
+      await firestore.tournamentsMeta.update(tId, { status: 'break' });
+      notice(state, 'all', `«${t.name}»: перерыв ${br.duration} мин`, 'info');
+    } else {
+      updateData.status = 'active';
+      updateData.breakEndsAt = null;
+      await firestore.tournamentsMeta.update(tId, { status: 'active' });
+    }
+
+    await realtime.updateTournamentState(tId, updateData);
     return null;
   },
 
-  prevLevel(tId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || t.currentLevel === 0) return;
-      t.currentLevel -= 1;
-      if (t.status !== "registration" && t.status !== "finished") {
-        t.status = "active";
-        t.levelStartedAt = Date.now();
-        t.breakEndsAt = null;
-        t.pausedRemaining = null;
+  async prevLevel(tId: string) {
+    const t = findTournament(state, tId);
+    if (!t || t.currentLevel === 0) return;
+
+    const newLevel = t.currentLevel - 1;
+    const now = Date.now();
+
+    await realtime.updateTournamentState(tId, {
+      currentLevel: newLevel,
+      levelStartedAt: now,
+      status: 'active',
+      breakEndsAt: null,
+      pausedRemaining: null,
+    });
+
+    await firestore.tournamentsMeta.update(tId, { status: 'active' });
+  },
+
+  async startBreak(tId: string, minutes = 15) {
+    const t = findTournament(state, tId);
+    if (!t || (t.status !== 'active' && t.status !== 'paused')) return;
+
+    const now = Date.now();
+    const rem = t.status === 'active' ? levelRemainingMs(t, now) : (t.pausedRemaining ?? levelDurationMs(t));
+
+    await realtime.updateTournamentState(tId, {
+      status: 'break',
+      breakEndsAt: now + minutes * 60000,
+      pausedRemaining: rem,
+      levelStartedAt: null,
+    });
+
+    await firestore.tournamentsMeta.update(tId, { status: 'break' });
+    notice(state, 'all', `«${t.name}»: перерыв ${minutes} мин`, 'info');
+  },
+
+  async endBreak(tId: string) {
+    const t = findTournament(state, tId);
+    if (!t || t.status !== 'break') return;
+
+    const dur = levelDurationMs(t);
+    const rem = t.pausedRemaining ?? dur;
+    const now = Date.now();
+
+    await realtime.updateTournamentState(tId, {
+      status: 'active',
+      levelStartedAt: now - (dur - rem),
+      breakEndsAt: null,
+      pausedRemaining: null,
+    });
+
+    await firestore.tournamentsMeta.update(tId, { status: 'active' });
+  },
+
+  // ---------- Выбывшие и возвраты ----------
+  async eliminate(tId: string, userId: string, killerId: string | null): Promise<string | null> {
+    console.log('🔵 eliminate() вызвана');
+    
+    const t = findTournament(state, tId);
+    if (!t) {
+      console.error('❌ Турнир не найден');
+      return 'Турнир не найден';
+    }
+    
+    if (t.status === 'finished') {
+      console.error('❌ Турнир завершён');
+      return 'Турнир завершён';
+    }
+    
+    if (isEliminated(t, userId)) {
+      console.error('❌ Игрок уже выбыл');
+      return 'Игрок уже выбыл';
+    }
+
+    const now = Date.now();
+
+    console.log('🔵 Получаем состояние из Realtime DB...');
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData) {
+      console.error('❌ Состояние не найдено');
+      return 'Состояние не найдено';
+    }
+
+    const tables = (stateData.tables || []).map((tb: any) => ({
+      ...tb,
+      seats: (tb.seats || []).map((s: string | null) => (s === userId ? null : s)),
+    }));
+
+    const knockouts = [...(stateData.knockouts || []), { 
+      userId, 
+      killerId, 
+      level: t.currentLevel || 0, 
+      at: now 
+    }];
+
+    console.log('🔵 Сохраняем в Realtime DB...');
+    await realtime.updateTournamentState(tId, { tables, knockouts });
+
+    const name = nicknameOf(state, userId);
+    if (killerId) {
+      notice(state, 'all', `Нокаут! ${nicknameOf(state, killerId)} выбивает ${name}`, 'alert');
+    } else {
+      notice(state, 'all', `${name} покидает турнир (блайнды)`, 'info');
+    }
+
+    const updatedT = findTournament(state, tId);
+    if (updatedT) {
+      formFinalTableIfNeeded(state, updatedT);
+      if (remainingCount(updatedT) === 1) {
+        notice(state, 'all', `«${updatedT.name}»: остался один игрок — фиксируйте результат`, 'win');
       }
-    });
-  },
+    }
 
-  startBreak(tId: string, minutes = 15) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || (t.status !== "active" && t.status !== "paused")) return;
-      t.pausedRemaining = t.status === "active" ? levelRemainingMs(t, Date.now()) : (t.pausedRemaining ?? levelDurationMs(t));
-      t.status = "break";
-      t.breakEndsAt = Date.now() + minutes * 60_000;
-      t.levelStartedAt = null;
-      notice(db, "all", `«${t.name}»: перерыв ${minutes} мин`, "info");
-    });
-  },
-
-  endBreak(tId: string) {
-    mutate((db) => {
-      const t = db.tournaments.find((x) => x.id === tId);
-      if (!t || t.status !== "break") return;
-      const dur = levelDurationMs(t);
-      const rem = t.pausedRemaining ?? dur;
-      t.status = "active";
-      t.breakEndsAt = null;
-      t.levelStartedAt = Date.now() - (dur - rem);
-      t.pausedRemaining = null;
-    });
-  },
-
-  /* ---------- выбывшие и возвраты ---------- */
-
-  eliminate(tId: string, userId: string, killerId: string | null): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.status === "finished") return "Турнир завершён";
-    if (isEliminated(t, userId)) return "Игрок уже выбыл";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      for (const tb of tt.tables) {
-        const i = tb.seats.indexOf(userId);
-        if (i >= 0) tb.seats[i] = null;
-      }
-      tt.knockouts.push({ userId, killerId, level: tt.currentLevel, at: Date.now() });
-      const name = nicknameOf(db, userId);
-      if (killerId) notice(db, "all", `Нокаут! ${nicknameOf(db, killerId)} выбивает ${name}`, "alert");
-      else notice(db, "all", `${name} покидает турнир (блайнды)`, "info");
-      formFinalTableIfNeeded(db, tt);
-      if (remainingCount(tt) === 1) notice(db, "all", `«${tt.name}»: остался один игрок — фиксируйте результат`, "win");
-    });
+    console.log('✅ eliminate() завершена');
     return null;
   },
 
-  addRebuy(tId: string, userId: string, kind: RebuyKind): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (!isLive(t)) return "Действие доступно только во время игры";
-    if (!t.registrations.some((r) => r.userId === userId && r.status !== "refunded")) return "Игрок не участвует в турнире";
+  async addRebuy(tId: string, userId: string, kind: RebuyKind): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (!isLive(t)) return 'Действие доступно только во время игры';
+    if (!t.registrations.some((r) => r.userId === userId && r.status !== 'refunded')) {
+      return 'Игрок не участвует в турнире';
+    }
+
     const eliminated = isEliminated(t, userId);
     const now = Date.now();
 
     if (eliminated) {
-      if (!isLateRegOpen(t, now)) return "Поздняя регистрация закрыта — вернуть игрока нельзя";
-      if (!findFreeSeat(t)) return "Нет свободных мест за столами";
+      if (!isLateRegOpen(t, now)) return 'Поздняя регистрация закрыта — вернуть игрока нельзя';
+      if (!findFreeSeat(t)) return 'Нет свободных мест за столами';
     } else {
-      if (kind === "reentry" || kind === "lastchance") return "Игрок ещё в игре — ре-ентри недоступно";
-      if (!t.rebuyAllowed) return "В этом турнире ребаи запрещены";
-      if (t.currentLevel > t.rebuyUntilLevel) return `Ребаи закрыты после уровня ${t.rebuyUntilLevel + 1}`;
-      if (kind === "rebuy") {
-        const cnt = t.rebuys.filter((r) => r.userId === userId && r.kind === "rebuy").length;
+      if (kind === 'reentry' || kind === 'lastchance') return 'Игрок ещё в игре — ре-ентри недоступно';
+      if (!t.rebuyAllowed) return 'В этом турнире ребаи запрещены';
+      if (t.currentLevel > t.rebuyUntilLevel) {
+        return `Ребаи закрыты после уровня ${t.rebuyUntilLevel + 1}`;
+      }
+      if (kind === 'rebuy') {
+        const cnt = t.rebuys.filter((r) => r.userId === userId && r.kind === 'rebuy').length;
         if (cnt >= t.maxRebuys) return `Лимит ребаев (${t.maxRebuys}) исчерпан`;
-      } else if (t.rebuys.some((r) => r.userId === userId && r.kind === "addon")) {
-        return "Аддон уже куплен";
+      } else if (t.rebuys.some((r) => r.userId === userId && r.kind === 'addon')) {
+        return 'Аддон уже куплен';
       }
     }
 
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      const name = nicknameOf(db, userId);
-      if (eliminated) {
-        for (let i = tt.knockouts.length - 1; i >= 0; i -= 1) {
-          if (tt.knockouts[i].userId === userId) { tt.knockouts.splice(i, 1); break; }
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData) return 'Состояние не найдено';
+
+    const rebuys = [...(stateData.rebuys || []), { userId, kind, at: now }];
+
+    if (eliminated) {
+      const knockouts = stateData.knockouts.filter((k: any) => k.userId !== userId);
+      const tables = stateData.tables.map((tb: any) => ({ ...tb }));
+
+      for (const tb of tables) {
+        const idx = tb.seats.indexOf(null);
+        if (idx >= 0) {
+          tb.seats[idx] = userId;
+          break;
         }
-        const slot = findFreeSeat(tt);
-        if (slot) {
-          const tb = tt.tables.find((x) => x.number === slot.table);
-          if (tb) tb.seats[slot.seat] = userId;
-        }
-        notice(db, "all", `${name} возвращается в игру — ${REBUY_LABELS[kind].toLowerCase()}, фишки добавлены в банк`, "alert");
-      } else {
-        notice(db, "all", `${name} — ${REBUY_LABELS[kind].toLowerCase()}, фишки добавлены в банк`, "info");
       }
-      tt.rebuys.push({ userId, kind, at: Date.now() });
-    });
+
+      await realtime.updateTournamentState(tId, { rebuys, knockouts, tables });
+      notice(state, 'all', `${nicknameOf(state, userId)} возвращается в игру`, 'alert');
+    } else {
+      await realtime.updateTournamentState(tId, { rebuys });
+      notice(state, 'all', `${nicknameOf(state, userId)} — ${REBUY_LABELS[kind] || kind}`, 'info');
+    }
+
     return null;
   },
 
-  addBonus(tId: string, userId: string, name: string, chips: number): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (!isLive(t)) return "Бонусы раздаются только во время игры";
-    const label = name.trim();
-    if (!label) return "Укажите название бонуса";
-    if (!chips || chips <= 0) return "Укажите количество фишек";
-    if (isEliminated(t, userId)) return "Игрок уже выбыл — бонус недоступен";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      tt.bonuses.push({ id: uid("bn"), userId, name: label, chips: Math.round(chips), at: Date.now() });
-      notice(db, "all", `${nicknameOf(db, userId)} получает бонус «${label}»: +${Math.round(chips).toLocaleString("ru-RU")} фишек в банк`, "win");
-    });
+  async addBonus(tId: string, userId: string, name: string, chips: number): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t) return 'Турнир не найден';
+    if (!isLive(t)) return 'Бонусы раздаются только во время игры';
+    if (!name.trim()) return 'Укажите название бонуса';
+    if (!chips || chips <= 0) return 'Укажите количество фишек';
+    if (isEliminated(t, userId)) return 'Игрок уже выбыл — бонус недоступен';
+
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData) return 'Состояние не найдено';
+
+    const bonuses = [...(stateData.bonuses || []), { id: uid('bn'), userId, name: name.trim(), chips: Math.round(chips), at: Date.now() }];
+
+    await realtime.updateTournamentState(tId, { bonuses });
+    notice(state, 'all', `${nicknameOf(state, userId)} получает бонус «${name}»: +${chips.toLocaleString('ru-RU')} фишек в банк`, 'win');
+
     return null;
   },
 
-  /* ---------- завершение и очки ---------- */
+  // ---------- Завершение ----------
+  async finishTournament(tId: string): Promise<string | null> {
+    console.log('🔵 finishTournament() вызвана для', tId);
+    
+    const t = findTournament(state, tId);
+    if (!t) {
+      console.error('❌ Турнир не найден');
+      return 'Турнир не найден';
+    }
+    
+    if (t.results) {
+      console.log('ℹ️ Результаты уже опубликованы');
+      return 'Результаты уже опубликованы';
+    }
+    
+    if (t.status === 'registration') {
+      console.error('❌ Турнир ещё не стартовал');
+      return 'Турнир ещё не стартовал';
+    }
 
-  finishTournament(tId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t) return "Турнир не найден";
-    if (t.results) return "Результаты уже опубликованы";
-    if (t.status === "registration") return "Турнир ещё не стартовал";
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      const order = provisionalResults(tt);
-      const n = order.length;
-      const results: ResultEntry[] = order.map(({ userId, place }) => {
-        const ko = tt.knockouts.filter((k) => k.killerId === userId).length;
-        const rb = tt.rebuys.filter((r) => r.userId === userId && r.kind !== "addon").length;
-        const ad = tt.rebuys.filter((r) => r.userId === userId && r.kind === "addon").length;
-        const ret = tt.rebuys.filter((r) => r.userId === userId && (r.kind === "reentry" || r.kind === "lastchance")).length;
-        const pts = tt.nonScoring ? 0 : scoreForPlace(tt.scoring, place, ko);
-        return { userId, place, points: pts, knockouts: ko, rebuys: rb, addons: ad, returns: ret };
+    console.log('🔵 Получаем состояние из Realtime DB...');
+    const stateData = await realtime.getTournamentState(tId);
+    if (!stateData) {
+      console.error('❌ Состояние не найдено в Realtime DB');
+      return 'Состояние не найдено';
+    }
+    
+    console.log('🔵 Состояние получено');
+
+    console.log('🔵 Вычисляем provisionalResults...');
+    const order = provisionalResults(t);
+    const n = order.length;
+    console.log('🔵 Порядок мест:', order);
+
+    const results: Result[] = order.map(({ userId, place }) => {
+      const ko = t.knockouts?.filter((k) => k.killerId === userId).length || 0;
+      const rb = t.rebuys?.filter((r) => r.userId === userId && r.kind !== 'addon').length || 0;
+      const ad = t.rebuys?.filter((r) => r.userId === userId && r.kind === 'addon').length || 0;
+      const ret = t.rebuys?.filter((r) => r.userId === userId && (r.kind === 'reentry' || r.kind === 'lastchance')).length || 0;
+      const pts = t.nonScoring ? 0 : scoreForPlace(t.scoring, place, ko);
+      return { userId, place, points: pts, knockouts: ko, rebuys: rb, addons: ad, returns: ret };
+    });
+
+    console.log('🔵 Результаты:', results);
+
+    try {
+      console.log('🔵 Сохраняем результаты в Firestore...');
+      await firestore.results.batchCreate(tId, results);
+      console.log('✅ Результаты сохранены в Firestore');
+    } catch (error) {
+      console.error('❌ Ошибка сохранения результатов:', error);
+      return 'Ошибка сохранения результатов';
+    }
+
+    try {
+      console.log('🔵 Обновляем метаданные турнира...');
+      await firestore.tournamentsMeta.update(tId, {
+        status: 'finished',
+        regOpen: false,
+        results: results.map((r) => ({ 
+          userId: r.userId, 
+          place: r.place, 
+          points: r.points, 
+          knockouts: r.knockouts, 
+          rebuys: r.rebuys, 
+          addons: r.addons, 
+          returns: r.returns 
+        })),
       });
-      tt.results = results;
-      tt.status = "finished";
-      tt.regOpen = false;
-      tt.breakEndsAt = null;
-      tt.levelStartedAt = null;
-      tt.lateRegUntil = null;
+      console.log('✅ Метаданные обновлены');
+    } catch (error) {
+      console.error('❌ Ошибка обновления метаданных:', error);
+      return 'Ошибка обновления метаданных';
+    }
 
-      for (const r of results) {
-        const u = findUser(db, r.userId);
-        if (!u) continue;
-        u.stats.tournamentsPlayed += 1;
-        if (r.place === 1) u.stats.wins += 1;
-        if (r.place <= 3) u.stats.top3 += 1;
-        if (r.place <= 9) u.stats.finalTables += 1;
-        u.stats.knockouts += r.knockouts;
-        u.stats.rebuys += r.rebuys + r.addons;
-        u.stats.returns += r.returns;
-        if (r.place <= itmCutoff(n)) u.stats.inMoney += 1;
-        u.stats.totalPlace += r.place;
-        u.stats.bestPlace = u.stats.bestPlace === 0 ? r.place : Math.min(u.stats.bestPlace, r.place);
-        if (r.points > u.stats.bestPoints) u.stats.bestPoints = r.points;
-        const fresh = freshAchievements(u.stats, u.achievements, db.achievements);
-        if (fresh.length) {
-          u.achievements.push(...fresh.map((f) => f.id));
-          fresh.forEach((f) => notice(db, u.id, `Новое достижение: «${f.name}»`, "win"));
-        }
+    try {
+      console.log('🔵 Обновляем состояние в Realtime DB...');
+      await realtime.updateTournamentState(tId, {
+        status: 'finished',
+        breakEndsAt: null,
+        levelStartedAt: null,
+        lateRegUntil: null,
+      });
+      console.log('✅ Состояние обновлено в Realtime DB');
+    } catch (error) {
+      console.error('❌ Ошибка обновления состояния:', error);
+      return 'Ошибка обновления состояния';
+    }
+
+    console.log('🔵 Обновляем статистику игроков...');
+    const seasonId = t.seasonId;
+    const ratingUpdates: Array<{
+      userId: string;
+      points: number;
+      events: number;
+      wins: number;
+      top3: number;
+      finalTables: number;
+      knockouts: number;
+      returns: number;
+      bestPoints: number;
+    }> = [];
+
+    for (const r of results) {
+      const u = findUser(state, r.userId);
+      if (!u) continue;
+
+      u.stats.tournamentsPlayed += 1;
+      if (r.place === 1) u.stats.wins += 1;
+      if (r.place <= 3) u.stats.top3 += 1;
+      if (r.place <= 9) u.stats.finalTables += 1;
+      u.stats.knockouts += r.knockouts;
+      u.stats.rebuys += r.rebuys + r.addons;
+      u.stats.returns += r.returns;
+      if (r.place <= itmCutoff(n)) u.stats.inMoney += 1;
+      u.stats.totalPlace += r.place;
+      u.stats.bestPlace = u.stats.bestPlace === 0 ? r.place : Math.min(u.stats.bestPlace, r.place);
+      if (r.points > u.stats.bestPoints) u.stats.bestPoints = r.points;
+
+      try {
+        await firestore.users.update(u.id, { stats: u.stats });
+      } catch (error) {
+        console.error(`❌ Ошибка обновления статистики для ${u.id}:`, error);
       }
-      const winner = results.find((r) => r.place === 1);
-      notice(db, "all", `«${tt.name}» завершён — побеждает ${winner ? nicknameOf(db, winner.userId) : "—"}!`, "win");
-    });
+
+      const fresh = freshAchievements(u.stats, u.achievements, state.achievements);
+      if (fresh.length) {
+        u.achievements.push(...fresh.map((f) => f.id));
+        try {
+          await firestore.users.update(u.id, { achievements: u.achievements });
+        } catch (error) {
+          console.error(`❌ Ошибка обновления достижений для ${u.id}:`, error);
+        }
+        fresh.forEach((f) => {
+          notice(state, u.id, `Новое достижение: «${f.name}»`, 'win');
+        });
+      }
+
+      ratingUpdates.push({
+        userId: r.userId,
+        points: r.points,
+        events: 1,
+        wins: r.place === 1 ? 1 : 0,
+        top3: r.place <= 3 ? 1 : 0,
+        finalTables: r.place <= 9 ? 1 : 0,
+        knockouts: r.knockouts,
+        returns: r.returns,
+        bestPoints: r.points,
+      });
+    }
+
+    try {
+      if (seasonId) {
+        console.log('🔵 Обновляем рейтинг сезона...');
+        await firestore.ratings.updateBatch(seasonId, ratingUpdates);
+      }
+      console.log('🔵 Обновляем глобальный рейтинг...');
+      await firestore.ratings.updateBatch('global', ratingUpdates);
+      console.log('✅ Рейтинги обновлены');
+    } catch (error) {
+      console.error('❌ Ошибка обновления рейтингов:', error);
+    }
+
+    const winner = results.find((r) => r.place === 1);
+    notice(state, 'all', `«${t.name}» завершён — побеждает ${winner ? nicknameOf(state, winner.userId) : '—'}!`, 'win');
+    
+    console.log('✅ Турнир успешно завершён!');
     return null;
   },
 
-  /* ---------- финал сезона: топ-18, очки не начисляются ---------- */
+  // ---------- Финал сезона ----------
+  async createSeasonFinal(seasonId: string): Promise<string | null> {
+    const season = state.seasons.find((s) => s.id === seasonId);
+    if (!season) return 'Сезон не найден';
+    if (state.tournaments.some((t) => t.nonScoring && t.seasonId === seasonId)) {
+      return 'Финальный турнир сезона уже создан';
+    }
 
-  createSeasonFinal(seasonId: string): string | null {
-    const season = state.seasons.find((x) => x.id === seasonId);
-    if (!season) return "Сезон не найден";
-    if (state.tournaments.some((t) => t.nonScoring && t.seasonId === seasonId)) return "Финальный турнир сезона уже создан";
     const board = computeBoard(state, seasonId);
     const top = board.slice(0, 18).map((b) => b.userId);
-    if (top.length < 2) return "В зачёте сезона меньше двух игроков — финал невозможен";
+    if (top.length < 2) return 'В зачёте сезона меньше двух игроков — финал невозможен';
 
-    const id = uid("tr");
-    const date = new Date(Date.now() + 7 * 86400_000);
+    const id = uid('tr');
+    const date = new Date(Date.now() + 7 * 86400000);
     date.setHours(19, 0, 0, 0);
 
-    // столы: по 9 мест, «змейка» по рейтингу
     const nTables = Math.max(1, Math.ceil(top.length / 9));
     const tables = Array.from({ length: nTables }, (_, i) => ({
-      number: i + 1, isFinal: nTables === 1, capacity: 9, seats: Array(9).fill(null) as (string | null)[],
+      number: i + 1,
+      isFinal: nTables === 1,
+      capacity: 9,
+      seats: Array(9).fill(null) as (string | null)[],
     }));
+
     top.forEach((userId, i) => {
       const round = Math.floor(i / nTables);
       const pos = i % nTables;
@@ -828,111 +1225,175 @@ export const actions = {
       if (seatIdx >= 0) tb.seats[seatIdx] = userId;
     });
 
-    mutate((db) => {
-      db.tournaments.unshift({
-        id,
-        name: `Финал сезона · ${season.name}`,
-        templateId: null, seasonId,
-        date: date.toISOString(),
-        description: "Финальный турнир сезона для топ-18 рейтинга. Очки не начисляются, в зачёт рейтингов не входит.",
-        type: "freezeout", maxPlayers: 18, startingChips: 30000,
-        levels: [
-          { sb: 50, bb: 100, ante: 0, duration: 15 }, { sb: 100, bb: 200, ante: 0, duration: 15 },
-          { sb: 150, bb: 300, ante: 0, duration: 15 }, { sb: 200, bb: 400, ante: 50, duration: 15 },
-          { sb: 300, bb: 600, ante: 75, duration: 15 }, { sb: 400, bb: 800, ante: 100, duration: 15 },
-          { sb: 600, bb: 1200, ante: 150, duration: 15 }, { sb: 800, bb: 1600, ante: 200, duration: 15 },
-          { sb: 1200, bb: 2400, ante: 300, duration: 15 }, { sb: 2000, bb: 4000, ante: 500, duration: 15 },
-        ],
-        breaks: [{ afterLevel: 3, duration: 20 }, { afterLevel: 6, duration: 20 }],
-        rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
-        lateRegMinutes: 30, lateRegUntil: null,
-        bonusDefs: [{ name: "Чип-бонус", chips: 10000 }],
-        scoring: { grid: [], participation: 0, knockoutPoints: 0, knockoutEnabled: false },
-        nonScoring: true, finalTableAt: 9,
-        status: "registration", regOpen: false,
-        currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
-        registrations: top.map((userId) => ({ userId, status: "checked-in" as const, registeredAt: Date.now(), checkedInAt: Date.now() })),
-        tables, knockouts: [], rebuys: [], bonuses: [], results: null,
-        createdBy: sessionUid ?? "u_admin", createdAt: Date.now(),
-      });
-      notice(db, "all", `Сформирован финал сезона «${season.name}» — топ-18 в списке`, "win");
+    const tournament: Tournament = {
+      id,
+      name: `Финал сезона · ${season.name}`,
+      templateId: null,
+      seasonId,
+      date: date.toISOString(),
+      description: 'Финальный турнир сезона для топ-18 рейтинга. Очки не начисляются, в зачёт рейтингов не входит.',
+      type: 'freezeout',
+      maxPlayers: 18,
+      startingChips: 30000,
+      levels: [
+        { sb: 50, bb: 100, ante: 0, duration: 15 },
+        { sb: 100, bb: 200, ante: 0, duration: 15 },
+        { sb: 150, bb: 300, ante: 0, duration: 15 },
+        { sb: 200, bb: 400, ante: 50, duration: 15 },
+        { sb: 300, bb: 600, ante: 75, duration: 15 },
+        { sb: 400, bb: 800, ante: 100, duration: 15 },
+        { sb: 600, bb: 1200, ante: 150, duration: 15 },
+        { sb: 800, bb: 1600, ante: 200, duration: 15 },
+        { sb: 1200, bb: 2400, ante: 300, duration: 15 },
+        { sb: 2000, bb: 4000, ante: 500, duration: 15 },
+      ],
+      breaks: [
+        { afterLevel: 3, duration: 20 },
+        { afterLevel: 6, duration: 20 },
+      ],
+      rebuyAllowed: false,
+      maxRebuys: 0,
+      rebuyCostChips: 0,
+      rebuyUntilLevel: 0,
+      lateRegMinutes: 30,
+      lateRegUntil: null,
+      bonusDefs: [{ name: 'Чип-бонус', chips: 10000 }],
+      scoring: { grid: [], participation: 0, knockoutPoints: 0, knockoutEnabled: false },
+      nonScoring: true,
+      finalTableAt: 9,
+      status: 'registration',
+      regOpen: false,
+      currentLevel: 0,
+      levelStartedAt: null,
+      pausedRemaining: null,
+      breakEndsAt: null,
+      registrations: top.map((userId) => ({
+        userId,
+        status: 'checked-in' as const,
+        registeredAt: Date.now(),
+        checkedInAt: Date.now(),
+      })),
+      tables,
+      knockouts: [],
+      rebuys: [],
+      bonuses: [],
+      results: null,
+      createdBy: sessionUid ?? 'u_admin',
+      createdAt: Date.now(),
+    };
+
+    await firestore.tournamentsMeta.set(id, tournament);
+    await realtime.initTournamentState(id, {
+      status: 'registration',
+      currentLevel: 0,
+      levelStartedAt: null,
+      pausedRemaining: null,
+      breakEndsAt: null,
+      lateRegUntil: null,
+      tables,
+      knockouts: [],
+      rebuys: [],
+      bonuses: [],
+      playersCount: 0,
+      averageStack: 0,
     });
+
+    notice(state, 'all', `Сформирован финал сезона «${season.name}» — топ-18 в списке`, 'win');
     return id;
   },
 
-  /**
-   * Дозаполнение финала сезона резервом: если кто-то из топ-18 не прошёл
-   * регистрацию (его убрали из списка), свободные места занимают игроки
-   * с 19-го места и ниже — строго по убыванию рейтинга.
-   */
-  fillSeasonFinalReserves(tId: string): string | null {
-    const t = state.tournaments.find((x) => x.id === tId);
-    if (!t || !t.nonScoring) return "Это не финальный турнир сезона";
-    if (t.status === "finished") return "Турнир завершён";
+  async fillSeasonFinalReserves(tId: string): Promise<string | null> {
+    const t = findTournament(state, tId);
+    if (!t || !t.nonScoring) return 'Это не финальный турнир сезона';
+    if (t.status === 'finished') return 'Турнир завершён';
+
     const board = computeBoard(state, t.seasonId);
     const top18 = new Set(board.slice(0, 18).map((b) => b.userId));
+    const registered = new Set(t.registrations.map((r) => r.userId));
     let added = 0;
-    mutate((db) => {
-      const tt = db.tournaments.find((x) => x.id === tId)!;
-      const registered = new Set(tt.registrations.map((r) => r.userId));
-      for (const row of board) {
-        if (tt.registrations.length >= tt.maxPlayers) break;
-        if (top18.has(row.userId)) continue;      // резерв — только ниже топ-18
-        if (registered.has(row.userId)) continue;
-        tt.registrations.push({ userId: row.userId, status: "registered", registeredAt: Date.now(), checkedInAt: null });
-        registered.add(row.userId);
-        added += 1;
-      }
-      if (added > 0) notice(db, "all", `Финал сезона: из резерва добавлено игроков — ${added}`, "info");
-    });
+
+    const registrations = [...t.registrations];
+    for (const row of board) {
+      if (registrations.length >= t.maxPlayers) break;
+      if (top18.has(row.userId)) continue;
+      if (registered.has(row.userId)) continue;
+      registrations.push({
+        userId: row.userId,
+        status: 'registered' as const,
+        registeredAt: Date.now(),
+        checkedInAt: null,
+      });
+      registered.add(row.userId);
+      added += 1;
+    }
+
+    if (added > 0) {
+      await firestore.tournamentsMeta.update(tId, { registrations });
+      notice(state, 'all', `Финал сезона: из резерва добавлено игроков — ${added}`, 'info');
+    }
+
     return null;
   },
 
-  /* ---------- экраны, настройки, уведомления ---------- */
-
-  saveDisplay(d: DisplayCfg) {
-    mutate((db) => {
-      const i = db.displays.findIndex((x) => x.id === d.id);
-      if (i >= 0) db.displays[i] = d; else db.displays.push(d);
-    });
+  // ---------- ТВ-экраны ----------
+  async saveDisplay(d: DisplayCfg) {
+    await firestore.displays.set(d.id, d);
   },
 
-  deleteDisplay(id: string) {
-    mutate((db) => { db.displays = db.displays.filter((x) => x.id !== id); });
+  async deleteDisplay(id: string) {
+    await firestore.displays.delete(id);
   },
 
-  saveSettings(patch: Partial<DB["settings"]>) {
-    mutate((db) => { Object.assign(db.settings, patch); });
+  // ---------- Настройки ----------
+  async saveSettings(patch: Partial<ClubSettings>) {
+    await firestore.settings.update(patch);
   },
 
-  /* ---------- достижения (коллекция achievements) ---------- */
-
-  saveAchievement(def: AchievementDef): string | null {
-    if (!def.name.trim()) return "Укажите название достижения";
-    if (!def.condition || def.condition.min < 0) return "Укажите порог условия";
-    mutate((db) => {
-      const i = db.achievements.findIndex((a) => a.id === def.id);
-      if (i >= 0) db.achievements[i] = def;
-      else db.achievements.push(def);
-    });
+  // ---------- Достижения ----------
+  async saveAchievement(def: AchievementDef): Promise<string | null> {
+    if (!def.name.trim()) return 'Укажите название достижения';
+    if (!def.condition || def.condition.min < 0) return 'Укажите порог условия';
+    await firestore.achievements.set(def.id, def);
     return null;
   },
 
-  deleteAchievement(id: string) {
-    mutate((db) => { db.achievements = db.achievements.filter((a) => a.id !== id); });
+  async deleteAchievement(id: string) {
+    await firestore.achievements.delete(id);
   },
 
+  // ---------- Уведомления ----------
   markNoticesRead(userId: string) {
-    mutate((db) => { db.readMarkers[userId] = Date.now(); });
+    firestore.notices.markRead(userId);
   },
 
-  pushNotice(userId: string, text: string, kind: Notice["kind"] = "info") {
-    mutate((db) => notice(db, userId, text, kind));
+  pushNotice(userId: string, text: string, kind: Notice['kind'] = 'info') {
+    notice(state, userId, text, kind);
   },
 };
 
+// ============================================================
+//  ЭКСПОРТЫ
+// ============================================================
+
+export function subscribeStore(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+export function getState(): DB {
+  return state;
+}
+
+export function getVersion(): number {
+  return version;
+}
+
+export function getSessionUid(): string | null {
+  return sessionUid;
+}
+
 export function noticesFor(db: DB, userId: string): Notice[] {
-  return db.notices.filter((n) => n.userId === userId || n.userId === "all");
+  return db.notices.filter((n) => n.userId === userId || n.userId === 'all');
 }
 
 export function unreadCount(db: DB, userId: string): number {
@@ -940,7 +1401,8 @@ export function unreadCount(db: DB, userId: string): number {
   return noticesFor(db, userId).filter((n) => n.at > marker).length;
 }
 
-/** Турнир, который сейчас идёт (в клубе одновременно возможен только один). */
 export function liveTournament(db: DB): Tournament | undefined {
   return db.tournaments.find((t) => isLive(t));
 }
+
+export default actions;

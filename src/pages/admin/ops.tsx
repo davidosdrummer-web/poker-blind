@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Award, ExternalLink, Pencil, Plus, RefreshCw, Trash2, Volume2, VolumeX } from "lucide-react";
+import { Award, ExternalLink, Pencil, Plus, Trash2, Volume2, VolumeX } from "lucide-react";
 import { actions } from "../../lib/store";
 import { useDB } from "../../lib/hooks";
 import type { AchievementDef, DisplayMode, StatKey } from "../../types";
@@ -18,7 +18,6 @@ const MODES: Array<{ v: DisplayMode; label: string }> = [
   { v: "results", label: "Результаты" },
 ];
 
-/** Живой предпросмотр: реальный ТВ-маршрут в iframe, вписанный в карточку. */
 function TvPreview({ mode, tid, name }: { mode: DisplayMode; tid: string; name: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(0.28);
@@ -108,8 +107,6 @@ export function DisplaysPage() {
   );
 }
 
-/* ============================ НАСТРОЙКИ ============================ */
-
 const SWATCHES = [
   { c: "#d4a017", label: "Золото" },
   { c: "#e4ba41", label: "Шампань" },
@@ -144,7 +141,6 @@ export function SettingsPage() {
   const db = useDB();
   const [name, setName] = useState(db.settings.clubName);
   const [tagline, setTagline] = useState(db.settings.tagline);
-  const [confirmSeed, setConfirmSeed] = useState(false);
   const [achModal, setAchModal] = useState<AchievementDef | null>(null);
   const s = db.settings;
 
@@ -315,32 +311,7 @@ export function SettingsPage() {
             })}
           </div>
         </Card>
-
-        <Card className="border-danger-500/30 p-5">
-          <div className="mb-2 flex items-center gap-2 font-display text-sm font-bold text-danger-300">
-            <RefreshCw size={15} /> Демо-данные
-          </div>
-          <p className="text-xs leading-relaxed text-ink-400">
-            Сброс вернёт клуб к исходному состоянию: игроки, сезоны, турниры и рейтинг из поставки.
-            Изменения во всех вкладках будут перезаписаны.
-          </p>
-          <Button variant="danger" size="sm" className="mt-3" onClick={() => setConfirmSeed(true)}>
-            Сбросить к демо-данным
-          </Button>
-        </Card>
       </div>
-
-      <Modal open={confirmSeed} onClose={() => setConfirmSeed(false)} title="Сбросить все данные?">
-        <div className="space-y-4">
-          <p className="text-sm text-ink-300">Действие необратимо: текущие турниры, результаты и профили будут заменены демо-набором.</p>
-          <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setConfirmSeed(false)}>Отмена</Button>
-            <Button variant="danger" className="flex-1" onClick={() => { actions.reseedAll(); setConfirmSeed(false); toast("Демо-данные восстановлены"); }}>
-              Сбросить
-            </Button>
-          </div>
-        </div>
-      </Modal>
 
       {achModal && (
         <AchievementForm
@@ -357,8 +328,6 @@ export function SettingsPage() {
     </div>
   );
 }
-
-/* ---------------- форма достижения ---------------- */
 
 function AchievementForm({ value, onSave, onClose }: {
   value: AchievementDef;

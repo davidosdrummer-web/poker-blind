@@ -1,3 +1,4 @@
+// src/components/ui.tsx
 import {
   useEffect, useId, useState,
   type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode,
@@ -342,7 +343,17 @@ interface ToastItem { id: number; text: string; kind: ToastKind; }
 
 const toastListeners = new Set<(t: ToastItem) => void>();
 let toastId = 0;
+
+/**
+ * Показывает toast-уведомление.
+ * @param text - текст уведомления (строка)
+ * @param kind - тип: "ok" (зелёный), "err" (красный), "info" (золотой)
+ */
 export function toast(text: string, kind: ToastKind = "ok") {
+  if (!text || typeof text !== 'string') {
+    console.warn('toast() вызван с некорректным аргументом:', text);
+    return;
+  }
   toastId += 1;
   toastListeners.forEach((fn) => fn({ id: toastId, text, kind }));
 }

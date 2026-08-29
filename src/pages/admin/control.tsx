@@ -1,5 +1,6 @@
+// src/pages/admin/control.tsx
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Flag, MonitorPlay, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { actions } from "../../lib/store";
 import { useDB } from "../../lib/hooks";
@@ -10,16 +11,49 @@ import { CrosshairIcon, Spade } from "../../components/icons";
 
 export default function ControlPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const db = useDB();
   const t = db.tournaments.find((x) => x.id === id);
   const [tab, setTab] = useState("reg");
+  const [isStarting, setIsStarting] = useState(false);
 
   if (!t) {
     return <EmptyState icon={<Spade size={36} />} title="Турнир не найден" text="Возможно, он был удалён." />;
   }
 
   const regs = t.registrations.filter((r) => r.status !== "refunded");
+  const checkedIn = regs.filter((r) => r.status === "checked-in");
   const live = ["active", "break", "paused"].includes(t.status);
+  const hasTables = t.tables && t.tables.length > 0;
+  const seated = t.tables?.reduce((sum, tb) => sum + tb.seats.filter(Boolean).length, 0) || 0;
+  
+  // Проверка возможности запуска
+  const canStart = useMemo(() => {
+    const enoughPlayers = checkedIn.length >= 2;
+    const hasSeats = hasTables && seated >= 2;
+    const isRegistration = t.status === "registration";
+    return enoughPlayers && hasSeats && isRegistration;
+  }, [checkedIn.length, hasTables, seated, t.status]);
+
+  // Запуск турнира
+  const handleStartTournament = async () => {
+    if (isStarting) return;
+    setIsStarting(true);
+    try {
+      const err = await actions.startTournament(t.id);
+      if (err) {
+        toast(err, "err");
+        setIsStarting(false);
+      } else {
+        toast("Турнир запущен! Переходим на Пульт", "ok");
+        // Используем navigate вместо reload
+        navigate('/admin', { replace: true });
+      }
+    } catch (error: any) {
+      toast("Ошибка запуска: " + (error.message || "неизвестная ошибка"), "err");
+      setIsStarting(false);
+    }
+  };
 
   return (
     <div>
@@ -36,6 +70,18 @@ export default function ControlPage() {
             <Button size="sm" variant="felt"><SlidersHorizontal size={13} /> На пульт</Button>
           </Link>
         )}
+        {/* Кнопка запуска */}
+        {t.status === "registration" && (
+          <Button 
+            size="sm" 
+            variant="primary" 
+            onClick={handleStartTournament}
+            disabled={!canStart || isStarting}
+            title={!canStart ? "Нужно: 2+ игроков с чекином и столы" : ""}
+          >
+            {isStarting ? "Запуск..." : "🚀 Запустить турнир"}
+          </Button>
+        )}
         <Link to={`/admin/tournaments/${t.id}/edit`}>
           <Button size="sm" variant="outline">Редактировать</Button>
         </Link>
@@ -44,12 +90,30 @@ export default function ControlPage() {
         </Link>
       </PageHeader>
 
+      {/* Статус готовности к запуску */}
+      {t.status === "registration" && (
+        <div className="mb-4 rounded-lg border border-ink-700 bg-ink-850/70 p-3">
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <span className="font-semibold text-cream-100">Готовность к запуску:</span>
+            <Badge tone={checkedIn.length >= 2 ? "felt" : "ink"}>
+              {checkedIn.length >= 2 ? "✅" : "❌"} Игроков с чекином: {checkedIn.length}/2
+            </Badge>
+            <Badge tone={hasTables && seated >= 2 ? "felt" : "ink"}>
+              {hasTables && seated >= 2 ? "✅" : "❌"} Столы: {t.tables?.length || 0}, игроков за столами: {seated}
+            </Badge>
+            {canStart && (
+              <Badge tone="gold" dot>✅ Можно запускать!</Badge>
+            )}
+          </div>
+        </div>
+      )}
+
       <Tabs
         value={tab}
         onChange={setTab}
         items={[
           { id: "reg", label: `Регистрация · ${regs.length}` },
-          { id: "tables", label: `Столы · ${t.tables.length}` },
+          { id: "tables", label: `Столы · ${t.tables?.length || 0}` },
           { id: "results", label: t.results ? "Итоги" : "Результаты" },
         ]}
       />
@@ -59,12 +123,15 @@ export default function ControlPage() {
           <Card className="p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-ink-400">
-                записано {regs.length} из {t.maxPlayers} · чекин: <b className="text-felt-300">{regs.filter((r) => r.status === "checked-in").length}</b>
+                записано {regs.length} из {t.maxPlayers} · чекин: <b className="text-felt-300">{checkedIn.length}</b>
               </div>
               {t.status === "registration" && (
                 <Toggle
                   checked={t.regOpen}
-                  onChange={(v) => { actions.setRegOpen(t.id, v); toast(v ? "Регистрация открыта" : "Регистрация закрыта", "info"); }}
+                  onChange={(v) => { 
+                    actions.setRegOpen(t.id, v);
+                    toast(v ? "Регистрация открыта" : "Регистрация закрыта", "info");
+                  }}
                   label={t.regOpen ? "Регистрация открыта" : "Регистрация закрыта"}
                 />
               )}
@@ -108,12 +175,18 @@ export default function ControlPage() {
 
         {tab === "tables" && (
           <div>
-            {t.tables.length === 0 && <EmptyState title="Столы не настроены" text="Рассадка выполняется на странице турнира (раздел «Столы») или автоматически при запуске." />}
-            {t.tables.length > 0 && (
+            {!t.tables || t.tables.length === 0 && (
+              <EmptyState title="Столы не настроены" text="Рассадка выполняется на странице турнира (раздел «Столы») или автоматически при запуске." />
+            )}
+            {t.tables && t.tables.length > 0 && (
               <>
                 {live && (
                   <div className="mb-4 flex justify-end">
-                    <Button size="sm" variant="outline" onClick={() => { const e = actions.balanceTables(t.id); toast(e ?? "Столы сбалансированы", e ? "err" : "ok"); }}>
+                    <Button size="sm" variant="outline" onClick={() => { 
+                      const err = actions.balanceTables(t.id); 
+                      if (err) toast(err, "err"); 
+                      else toast("Столы сбалансированы", "ok");
+                    }}>
                       <RefreshCw size={13} /> Баланс столов
                     </Button>
                   </div>
@@ -160,19 +233,43 @@ export default function ControlPage() {
 
 function ResultsTab({ tId }: { tId: string }) {
   const db = useDB();
+  const navigate = useNavigate();
   const t = db.tournaments.find((x) => x.id === tId)!;
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
 
   const provisional = useMemo(() => {
     if (t.results) return t.results.map((r) => ({ userId: r.userId, place: r.place }));
     const regAt = new Map<string, number>();
     for (const r of t.registrations) regAt.set(r.userId, r.checkedInAt ?? r.registeredAt);
     const seatedIds: string[] = [];
-    for (const tb of t.tables) for (const s of tb.seats) if (s) seatedIds.push(s);
+    if (t.tables) {
+      for (const tb of t.tables) for (const s of tb.seats) if (s) seatedIds.push(s);
+    }
     const remaining = seatedIds.sort((a, b) => (regAt.get(a) ?? 0) - (regAt.get(b) ?? 0));
     const out = [...t.knockouts].reverse().map((k) => k.userId);
     return [...remaining, ...out].map((userId, i) => ({ userId, place: i + 1 }));
   }, [t]);
+
+  const handleFinishTournament = async () => {
+    if (isFinishing) return;
+    setIsFinishing(true);
+    try {
+      const err = await actions.finishTournament(t.id);
+      if (err) {
+        toast(err, "err");
+      } else {
+        toast("Результаты опубликованы — очки начислены", "ok");
+        // Перенаправляем на страницу турнира для просмотра результатов
+        navigate(`/admin/tournaments/${t.id}`, { replace: true });
+      }
+    } catch (error: any) {
+      toast("Ошибка завершения: " + (error.message || "неизвестная ошибка"), "err");
+    } finally {
+      setIsFinishing(false);
+      setConfirmFinish(false);
+    }
+  };
 
   if (t.results) {
     const maxPts = t.results[0]?.points ?? 1;
@@ -225,7 +322,13 @@ function ResultsTab({ tId }: { tId: string }) {
           <div className="text-xs text-ink-400">оставшиеся — по времени чекина, выбывшие — в обратном порядке вылета</div>
         </div>
         {t.status !== "registration" && (
-          <Button variant="danger" onClick={() => setConfirmFinish(true)}><Flag size={14} /> Опубликовать итоги</Button>
+          <Button 
+            variant="danger" 
+            onClick={() => setConfirmFinish(true)}
+            disabled={isFinishing}
+          >
+            <Flag size={14} /> {isFinishing ? "Завершение..." : "Опубликовать итоги"}
+          </Button>
         )}
       </div>
       <div className="space-y-1">
@@ -250,15 +353,12 @@ function ResultsTab({ tId }: { tId: string }) {
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setConfirmFinish(false)}>Отмена</Button>
             <Button
-              variant="danger" className="flex-1"
-              onClick={() => {
-                const err = actions.finishTournament(t.id);
-                if (err) toast(err, "err");
-                else toast("Результаты опубликованы — очки начислены");
-                setConfirmFinish(false);
-              }}
+              variant="danger"
+              className="flex-1"
+              onClick={handleFinishTournament}
+              disabled={isFinishing}
             >
-              <Flag size={14} /> Опубликовать
+              <Flag size={14} /> {isFinishing ? "Завершение..." : "Опубликовать"}
             </Button>
           </div>
         </div>

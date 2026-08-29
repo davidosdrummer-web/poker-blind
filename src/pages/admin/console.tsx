@@ -1,5 +1,6 @@
+// src/pages/admin/console.tsx
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Coffee, ExternalLink, Flag, Gift, Minus, MonitorPlay,
   Pause, Pencil, Play, Plus, RotateCcw, TimerReset, Undo2, X,
@@ -25,6 +26,7 @@ const RETURN_KINDS: Array<{ kind: RebuyKind; desc: string }> = [
 
 export default function ConsolePage() {
   const db = useDB();
+  const navigate = useNavigate();
   const t = liveTournament(db);
 
   if (!t) {
@@ -37,15 +39,17 @@ export default function ConsolePage() {
           text="В клубе одновременно проводится один турнир. Откройте запланированный на странице «Турниры» и запустите его."
         />
         <div className="mt-4 flex justify-center">
-          <Link to="/admin/tournaments"><Button><Play size={15} /> К турнирам</Button></Link>
+          <Link to="/admin/tournaments">
+            <Button><Play size={15} /> К турнирам</Button>
+          </Link>
         </div>
       </div>
     );
   }
-  return <LiveConsole t={t} db={db} />;
+  return <LiveConsole t={t} db={db} navigate={navigate} />;
 }
 
-function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
+function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (path: string) => void }) {
   const now = useNow(1000);
   const lvl = t.levels[Math.min(t.currentLevel, t.levels.length - 1)];
   const isBreak = t.status === "break";
@@ -67,11 +71,12 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
   const [bnName, setBnName] = useState("");
   const [bnChips, setBnChips] = useState(5000);
   const [returnFor, setReturnFor] = useState<string | null>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
 
   const eliminated = useMemo(() => [...t.knockouts].reverse(), [t.knockouts]);
   const nick = (uidv: string | null) => (uidv ? db.users.find((u) => u.id === uidv)?.nickname ?? "—" : "блайнды");
 
-  /* движок: автоповышение блайндов + выход с перерыва */
+  // Движок: автоповышение блайндов + выход с перерыва
   useEffect(() => {
     if (t.status === "active" && t.levelStartedAt != null && levelRemainingMs(t, now) <= 0 && t.currentLevel < t.levels.length - 1) {
       const err = actions.nextLevel(t.id);
@@ -80,27 +85,67 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
     }
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
       actions.endBreak(t.id);
-      toast("Перерыв завершён — игра продолжается");
+      toast("Перерыв завершён — игра продолжается", "info");
     }
   }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
 
-  const togglePause = () => {
-    if (t.status === "active") { actions.pauseTournament(t.id); toast("Таймер остановлен", "info"); }
-    else if (t.status === "paused") { actions.resumeTournament(t.id); toast("Игра возобновлена"); }
+  const togglePause = async () => {
+    if (t.status === "active") { 
+      await actions.pauseTournament(t.id); 
+      toast("Таймер остановлен", "info"); 
+    } else if (t.status === "paused") { 
+      await actions.resumeTournament(t.id); 
+      toast("Игра возобновлена", "ok"); 
+    }
   };
 
   useHotkeys({
     " ": togglePause,
-    n: () => { const e = actions.nextLevel(t.id); if (e) toast(e, "err"); },
+    n: () => { 
+      const err = actions.nextLevel(t.id); 
+      if (err) toast(err, "err"); 
+    },
     p: () => actions.prevLevel(t.id),
-    b: () => { if (t.status === "active") { actions.startBreak(t.id, breakMin); toast(`Перерыв ${breakMin} мин`, "info"); } },
+    b: () => { 
+      if (t.status === "active") { 
+        actions.startBreak(t.id, breakMin); 
+        toast(`Перерыв ${breakMin} мин`, "info"); 
+      } 
+    },
   });
 
-  const doReturn = (userId: string, kind: RebuyKind) => {
-    const err = actions.addRebuy(t.id, userId, kind);
-    if (err) { toast(err, "err"); return; }
-    toast(`${nick(userId)}: ${REBUY_LABELS[kind]} — фишки в банке`);
-    setReturnFor(null);
+  const doReturn = async (userId: string, kind: RebuyKind) => {
+    try {
+      const err = await actions.addRebuy(t.id, userId, kind);
+      if (err) { 
+        toast(err, "err"); 
+        return; 
+      }
+      toast(`${nick(userId)}: ${REBUY_LABELS[kind]} — фишки в банке`, "ok");
+      setReturnFor(null);
+    } catch (error: any) {
+      toast("Ошибка: " + (error.message || "неизвестная"), "err");
+    }
+  };
+
+  const handleFinishTournament = async () => {
+    if (isFinishing) return;
+    setIsFinishing(true);
+    try {
+      const err = await actions.finishTournament(t.id);
+      if (err) {
+        toast(err, "err");
+      } else {
+        toast("Результаты опубликованы — очки начислены", "ok");
+        // Переход на страницу турнира для просмотра результатов
+        navigate(`/admin/tournaments/${t.id}`);
+      }
+    } catch (error: any) {
+      toast("Ошибка завершения: " + (error.message || "неизвестная"), "err");
+    } finally {
+      setIsFinishing(false);
+      setModal("");
+    }
   };
 
   const events = useMemo(() => {
@@ -108,7 +153,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
     const rb = t.rebuys.map((r) => ({ at: r.at, kind: "ret" as const, text: `${nick(r.userId)} — ${REBUY_LABELS[r.kind].toLowerCase()}` }));
     const bn = t.bonuses.map((b) => ({ at: b.at, kind: "bn" as const, text: `${nick(b.userId)} — бонус «${b.name}» +${fmtNum(b.chips)}` }));
     return [...ko, ...rb, ...bn].sort((a, b) => b.at - a.at).slice(0, 12);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.knockouts, t.rebuys, t.bonuses, db.users]);
 
   return (
@@ -116,7 +160,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
       <PageHeader kicker="пульт · живой турнир" title={t.name}>
         <StatusBadge status={t.status} />
         {(() => {
-          const hasFinal = t.tables.some((tb) => tb.isFinal);
+          const hasFinal = t.tables?.some((tb) => tb.isFinal) || false;
           if (hasFinal) return <Badge tone="gold" dot>финальный стол</Badge>;
           if (t.finalTableAt > 0) {
             return (
@@ -137,11 +181,17 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
               ? <>поздняя регистрация: <b className="tabular font-mono text-gold-300">{fmtClock(lateRem / 1000)}</b></>
               : "поздняя регистрация закрыта"}
           </span>
-          <button onClick={() => { actions.adjustLateReg(t.id, 15); toast("Поздняя регистрация +15 мин", "info"); }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-gold-500 hover:text-ink-950">
+          <button onClick={() => { 
+            actions.adjustLateReg(t.id, 15); 
+            toast("Поздняя регистрация +15 мин", "info"); 
+          }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-gold-500 hover:text-ink-950">
             +15 мин
           </button>
           {lateOpen && (
-            <button onClick={() => { actions.adjustLateReg(t.id, -99999); toast("Поздняя регистрация закрыта", "info"); }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-danger-500">
+            <button onClick={() => { 
+              actions.adjustLateReg(t.id, -99999); 
+              toast("Поздняя регистрация закрыта", "info"); 
+            }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-danger-500">
               закрыть
             </button>
           )}
@@ -151,14 +201,13 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
         <Link to={`/display/main?t=${t.id}`} target="_blank"><Button size="sm" variant="outline"><MonitorPlay size={13} /> ТВ</Button></Link>
       </PageHeader>
 
-      {/* сводка */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {[
           { l: "фишек в игре", v: fmtChips(bd.total), c: "text-gold-300" },
           { l: "в игре", v: `${remaining} из ${participants.length}`, c: "text-felt-300" },
-          { l: "нокауты", v: String(t.knockouts.length), c: "text-danger-300" },
-          { l: "возвраты", v: String(t.rebuys.length), c: "text-cream-100" },
-          { l: "бонусы", v: `${t.bonuses.length} · ${fmtChips(bd.bonusChips)}`, c: "text-gold-300" },
+          { l: "нокауты", v: String(t.knockouts?.length || 0), c: "text-danger-300" },
+          { l: "возвраты", v: String(t.rebuys?.length || 0), c: "text-cream-100" },
+          { l: "бонусы", v: `${t.bonuses?.length || 0} · ${fmtChips(bd.bonusChips)}`, c: "text-gold-300" },
           { l: "уровень", v: `${t.currentLevel + 1}/${t.levels.length}`, c: "text-cream-100" },
         ].map((x) => (
           <div key={x.l} className="rounded-xl border border-ink-700 bg-ink-850/80 px-4 py-3">
@@ -169,7 +218,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,440px)_1fr]">
-        {/* таймер + управление */}
         <div className="space-y-5">
           <Card className="flex flex-col items-center p-6">
             <Ring ratio={t.status === "paused" ? 0.5 : Math.max(0.001, Math.min(1, ringRatio))} size={230} stroke={11} critical={remMs < 60000 && t.status === "active"}>
@@ -187,7 +235,10 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
 
             <div className="mt-5 grid w-full grid-cols-2 gap-2">
               {isBreak ? (
-                <Button variant="felt" onClick={() => { actions.endBreak(t.id); toast("Перерыв завершён"); }}>
+                <Button variant="felt" onClick={() => { 
+                  actions.endBreak(t.id); 
+                  toast("Перерыв завершён", "ok"); 
+                }}>
                   <Play size={15} /> С перерыва
                 </Button>
               ) : (
@@ -199,29 +250,51 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
                 <Select value={String(breakMin)} onChange={(e) => setBreakMin(Number(e.target.value))} className="w-[76px] px-2 text-xs">
                   {[10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} мин</option>)}
                 </Select>
-                <Button variant="outline" className="flex-1" disabled={isBreak} onClick={() => { actions.startBreak(t.id, breakMin); toast(`Перерыв ${breakMin} мин`, "info"); }}>
+                <Button variant="outline" className="flex-1" disabled={isBreak} onClick={() => { 
+                  actions.startBreak(t.id, breakMin); 
+                  toast(`Перерыв ${breakMin} мин`, "info"); 
+                }}>
                   <Coffee size={14} /> Перерыв
                 </Button>
               </div>
               <Button variant="dark" disabled={t.currentLevel === 0} onClick={() => actions.prevLevel(t.id)}>
                 <ArrowLeft size={14} /> Пред. уровень
               </Button>
-              <Button variant="dark" onClick={() => { const e = actions.nextLevel(t.id); if (e) toast(e, "err"); else toast(`Уровень ${t.currentLevel + 2}`, "info"); }}>
+              <Button variant="dark" onClick={() => { 
+                const err = actions.nextLevel(t.id); 
+                if (err) toast(err, "err"); 
+                else toast(`Уровень ${t.currentLevel + 2}`, "info"); 
+              }}>
                 След. уровень <ArrowRight size={14} />
               </Button>
-              <Button variant="outline" onClick={() => { actions.adjustTimer(t.id, -60); toast("−1 минута", "info"); }}>
+              <Button variant="outline" onClick={() => { 
+                actions.adjustTimer(t.id, -60); 
+                toast("−1 минута", "info"); 
+              }}>
                 <Minus size={14} /> 1 мин
               </Button>
-              <Button variant="outline" onClick={() => { actions.adjustTimer(t.id, 60); toast("+1 минута", "info"); }}>
+              <Button variant="outline" onClick={() => { 
+                actions.adjustTimer(t.id, 60); 
+                toast("+1 минута", "info"); 
+              }}>
                 <Plus size={14} /> 1 мин
               </Button>
             </div>
 
             <div className="mt-2.5 grid w-full grid-cols-3 gap-2">
-              <Button variant="danger" onClick={() => { setKoVictim(seated[0] ?? ""); setKoKiller(""); setModal("ko"); }}>
+              <Button variant="danger" onClick={() => { 
+                setKoVictim(seated[0] ?? ""); 
+                setKoKiller(""); 
+                setModal("ko"); 
+              }}>
                 <CrosshairIcon size={15} /> Выбивание
               </Button>
-              <Button onClick={() => { setBnUser(seated[0] ?? ""); setBnName(t.bonusDefs[0]?.name ?? "Чип-бонус"); setBnChips(t.bonusDefs[0]?.chips ?? Math.max(1000, lvl.bb * 10)); setModal("bonus"); }}>
+              <Button onClick={() => { 
+                setBnUser(seated[0] ?? ""); 
+                setBnName(t.bonusDefs?.[0]?.name ?? "Чип-бонус"); 
+                setBnChips(t.bonusDefs?.[0]?.chips ?? Math.max(1000, lvl.bb * 10)); 
+                setModal("bonus"); 
+              }}>
                 <Gift size={15} /> Бонус
               </Button>
               <Button variant="ghost" onClick={() => setModal("finish")}>
@@ -237,7 +310,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
             </div>
           </Card>
 
-          {/* структура блайндов */}
           <Card className="p-4">
             <div className="mb-2.5 font-mono text-[10px] uppercase tracking-[0.22em] text-gold-500">структура блайндов</div>
             <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
@@ -248,7 +320,13 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
                 return (
                   <div key={idx}>
                     <button
-                      onClick={() => { while (idx > t.currentLevel) { if (actions.nextLevel(t.id)) break; } while (idx < t.currentLevel) actions.prevLevel(t.id); }}
+                      onClick={() => { 
+                        while (idx > t.currentLevel) { 
+                          const err = actions.nextLevel(t.id); 
+                          if (err) break; 
+                        } 
+                        while (idx < t.currentLevel) actions.prevLevel(t.id); 
+                      }}
                       className={cx(
                         "flex w-full items-center gap-2.5 rounded-lg border px-3 py-1.5 text-left transition-all",
                         cur ? "border-gold-500/60 bg-gold-500/12" : "border-transparent hover:bg-ink-800/70",
@@ -271,7 +349,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
 
         {/* правая колонка */}
         <div className="grid min-w-0 content-start gap-5 lg:grid-cols-2">
-          {/* банк */}
           <Card className="p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-gold-500">
               <ChipIcon size={13} /> банк турнира
@@ -283,7 +360,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
               {bd.addons > 0 && <BreakdownRow label={`Аддоны · ${bd.addons}`} value={bd.addons * injectionChips(t, "addon")} plus />}
               {bd.reentries > 0 && <BreakdownRow label={`Ре-ентри · ${bd.reentries}`} value={bd.reentries * injectionChips(t, "reentry")} plus />}
               {bd.lastchances > 0 && <BreakdownRow label={`Ласт шанс · ${bd.lastchances}`} value={bd.lastchances * injectionChips(t, "lastchance")} plus />}
-              {bd.bonusChips > 0 && <BreakdownRow label={`Бонусы · ${t.bonuses.length}`} value={bd.bonusChips} plus gold />}
+              {bd.bonusChips > 0 && <BreakdownRow label={`Бонусы · ${t.bonuses?.length || 0}`} value={bd.bonusChips} plus gold />}
             </div>
             <p className="mt-4 border-t border-ink-700 pt-3 text-[11px] leading-relaxed text-ink-500">
               Каждый ввод фишек суммируется в банк. Фишки выбывших из банка не вычитаются —
@@ -291,7 +368,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
             </p>
           </Card>
 
-          {/* выбывшие */}
           <Card className={cx("flex min-h-0 flex-col p-5", eliminated.length > 0 && "border-danger-500/30")}>
             <div className="mb-3 flex items-center justify-between">
               <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-danger-400">
@@ -351,7 +427,6 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
             </p>
           </Card>
 
-          {/* лента */}
           <Card className="flex min-h-0 flex-col p-5 lg:col-span-2">
             <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-gold-500">лента событий</div>
             <div className="grid gap-2 md:grid-cols-2">
@@ -370,7 +445,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
         </div>
       </div>
 
-      {/* выбивание */}
+      {/* Выбивание */}
       <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание">
         <div className="space-y-4">
           <Field label="Кто выбыл">
@@ -399,7 +474,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
         </div>
       </Modal>
 
-      {/* бонус */}
+      {/* Бонус */}
       <Modal open={modal === "bonus"} onClose={() => setModal("")} title="Выдать бонус">
         <div className="space-y-4">
           <Field label="Игрок">
@@ -407,7 +482,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
               {seated.map((u) => <option key={u} value={u}>{nick(u)}</option>)}
             </Select>
           </Field>
-          {t.bonusDefs.length > 0 && (
+          {t.bonusDefs && t.bonusDefs.length > 0 && (
             <div>
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-300">Бонусы турнира</div>
               <div className="flex flex-wrap gap-1.5">
@@ -440,7 +515,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
               if (!bnUser) { toast("Выберите игрока", "err"); return; }
               const err = actions.addBonus(t.id, bnUser, bnName, bnChips);
               if (err) toast(err, "err");
-              else toast(`Бонус выдан: +${fmtNum(bnChips)} фишек в банк`);
+              else toast(`Бонус выдан: +${fmtNum(bnChips)} фишек в банк`, "ok");
               setModal("");
             }}
           >
@@ -449,7 +524,7 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
         </div>
       </Modal>
 
-      {/* завершение */}
+      {/* Завершение */}
       <Modal open={modal === "finish"} onClose={() => setModal("")} title="Завершить турнир?">
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-ink-300">
@@ -457,20 +532,17 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
             Очки по сетке, статистика и достижения рассчитаются мгновенно.
           </p>
           <div className="rounded-lg border border-gold-500/30 bg-gold-500/8 px-4 py-3 text-sm text-cream-100">
-            В игре: <b className="font-mono text-gold-300">{remaining}</b> · выбыло: <b className="font-mono">{t.knockouts.length}</b> · в зачёте: <b className="font-mono">{remaining + t.knockouts.length}</b>
+            В игре: <b className="font-mono text-gold-300">{remaining}</b> · выбыло: <b className="font-mono">{t.knockouts?.length || 0}</b> · в зачёте: <b className="font-mono">{remaining + (t.knockouts?.length || 0)}</b>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setModal("")}>Отмена</Button>
             <Button
-              variant="danger" className="flex-1"
-              onClick={() => {
-                const err = actions.finishTournament(t.id);
-                if (err) toast(err, "err");
-                else toast("Результаты опубликованы — очки начислены");
-                setModal("");
-              }}
+              variant="danger"
+              className="flex-1"
+              onClick={handleFinishTournament}
+              disabled={isFinishing}
             >
-              <Flag size={15} /> Опубликовать итоги
+              <Flag size={15} /> {isFinishing ? "Завершение..." : "Опубликовать итоги"}
             </Button>
           </div>
         </div>
