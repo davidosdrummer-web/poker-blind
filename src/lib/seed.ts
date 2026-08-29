@@ -204,7 +204,7 @@ function pastTournament(
     rebuyAllowed: tpl.rebuyAllowed, maxRebuys: tpl.maxRebuys,
     rebuyCostChips: tpl.rebuyCostChips, rebuyUntilLevel: tpl.rebuyUntilLevel,
     lateRegMinutes: tpl.lateRegMinutes, lateRegUntil: null,
-    bonusDefs: tpl.bonusDefs, scoring, nonScoring: false,
+    bonusDefs: tpl.bonusDefs, scoring, nonScoring: false, finalTableAt: 9,
     status: "finished", regOpen: false,
     currentLevel: tpl.levels.length - 1, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: participants.map((userId, i) => ({
@@ -241,7 +241,7 @@ function buildTournaments(): Tournament[] {
     rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
     lateRegMinutes: 40, lateRegUntil: now + 22 * 60_000,
     bonusDefs: [{ name: "Бонус за баунти", chips: 3000 }, { name: "Чип-бонус", chips: 5000 }],
-    scoring: scBounty, nonScoring: false,
+    scoring: scBounty, nonScoring: false, finalTableAt: 9,
     status: "active", regOpen: true,
     currentLevel: 3, levelStartedAt: now - 5.5 * 60_000, pausedRemaining: null, breakEndsAt: null,
     registrations: P(1, 24).map((userId, i) => ({
@@ -275,7 +275,7 @@ function buildTournaments(): Tournament[] {
     rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
     lateRegMinutes: 45, lateRegUntil: null,
     bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
-    scoring: defaultScoring(), nonScoring: false,
+    scoring: defaultScoring(), nonScoring: false, finalTableAt: 9,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: P(1, 17).map((userId, i) => ({
@@ -298,7 +298,7 @@ function buildTournaments(): Tournament[] {
     lateRegMinutes: 30, lateRegUntil: null,
     bonusDefs: [],
     scoring: { grid: defaultGrid(), participation: 8, knockoutPoints: 0, knockoutEnabled: false },
-    nonScoring: false,
+    nonScoring: false, finalTableAt: 6,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: P(2, 6).map((userId, i) => ({

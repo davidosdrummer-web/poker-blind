@@ -145,6 +145,8 @@ export interface Tournament {
   scoring: ScoringConfig;
   /** финал сезона: очки не начисляются и не попадают в рейтинги */
   nonScoring: boolean;
+  /** при каком количестве оставшихся игроков формируется общий финальный стол (0 — выключено) */
+  finalTableAt: number;
   status: TournamentStatus;
   regOpen: boolean;
   currentLevel: number;

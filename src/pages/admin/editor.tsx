@@ -38,7 +38,7 @@ function blankTournament(db: DB): Tournament {
     lateRegMinutes: 45, lateRegUntil: null,
     bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
     scoring: JSON.parse(JSON.stringify(sc)),
-    nonScoring: false,
+    nonScoring: false, finalTableAt: 9,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: [], tables: [], knockouts: [], rebuys: [], bonuses: [], results: null,
@@ -57,6 +57,7 @@ function fromTemplate(db: DB, tpl: Template): Partial<Tournament> {
     lateRegMinutes: tpl.lateRegMinutes,
     bonusDefs: JSON.parse(JSON.stringify(tpl.bonusDefs)),
     scoring: JSON.parse(JSON.stringify(tpl.scoring)),
+    tables: JSON.parse(JSON.stringify(tpl.tables ?? [])),
   };
 }
 
@@ -104,6 +105,7 @@ export default function TournamentEditorPage() {
       rebuyAllowed: draft.rebuyAllowed, maxRebuys: draft.maxRebuys,
       rebuyCostChips: draft.rebuyCostChips, rebuyUntilLevel: draft.rebuyUntilLevel,
       lateRegMinutes: draft.lateRegMinutes, bonusDefs: draft.bonusDefs, scoring: draft.scoring,
+      tables: draft.tables,
     });
     toast(`Шаблон «${name}» сохранён`);
     setSaveTplOpen(false);
@@ -263,6 +265,14 @@ export default function TournamentEditorPage() {
               </Field>
               <Field label="Регистрация после старта" hint="минут поздней регистрации, 0 — выключено">
                 <Input type="number" value={draft.lateRegMinutes} onChange={(e) => patch({ lateRegMinutes: Math.max(0, Number(e.target.value) || 0) })} className="font-mono" />
+              </Field>
+              <Field label="Финальный стол" hint="осталось игроков, 0 — выключено">
+                <div className="flex items-center gap-2">
+                  <Input type="number" value={draft.finalTableAt} onChange={(e) => patch({ finalTableAt: Math.max(0, Number(e.target.value) || 0) })} className="font-mono" disabled={!canEditGame} />
+                </div>
+                <span className="mt-1 block text-[10px] leading-snug text-ink-500">
+                  Когда за столами останется {draft.finalTableAt > 0 ? draft.finalTableAt : "N"} игроков, они автоматически перейдут за общий финальный стол — он появится на ТВ-экране «Финал»
+                </span>
               </Field>
               <div className="rounded-lg border border-ink-700 bg-ink-800/50 p-3">
                 <Toggle

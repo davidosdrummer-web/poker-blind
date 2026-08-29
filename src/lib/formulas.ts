@@ -1,6 +1,6 @@
 import type {
-  AchievementDef, BlindLevel, BoardRow, BreakRule, DB, RebuyKind, ScoringConfig, Tournament,
-  TournamentType, User, UserStats,
+  AchievementDef, BlindLevel, BoardRow, BreakRule, DB, RebuyKind, ScoringConfig, TableState,
+  Tournament, TournamentType, User, UserStats,
 } from "../types";
 
 /* ---------------- утилиты ---------------- */
@@ -111,7 +111,7 @@ export function structureMinutes(levels: BlindLevel[], breaks: BreakRule[]): num
   return levels.reduce((s, l) => s + l.duration, 0) + breaks.reduce((s, b) => s + b.duration, 0);
 }
 
-export function totalSeats(t: Tournament): number {
+export function totalSeats(t: { tables: TableState[] }): number {
   return t.tables.reduce((s, tb) => s + tb.seats.length, 0);
 }
 

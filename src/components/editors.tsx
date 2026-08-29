@@ -381,9 +381,14 @@ export function TablesEditor({ tables, onChange, participants, ratingOf }: {
       {/* столы */}
       <div className="grid content-start gap-4 md:grid-cols-2">
         {tables.length === 0 && (
-          <div className="rounded-xl border border-dashed border-ink-600 px-4 py-10 text-center text-sm text-ink-400 md:col-span-2">
-            Столов пока нет — добавьте первый, чтобы настроить рассадку
-          </div>
+          <button
+            onClick={addTable}
+            className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-ink-600 px-4 py-10 text-center transition-all hover:border-gold-500/60 hover:bg-gold-500/5 md:col-span-2"
+          >
+            <Plus size={22} className="text-gold-400" />
+            <span className="text-sm font-semibold text-ink-300">Столов пока нет — нажмите, чтобы добавить первый</span>
+            <span className="text-[11px] text-ink-500">9 мест · ёмкость настраивается после создания</span>
+          </button>
         )}
         {tables.map((tb) => (
           <div key={tb.number} className="rounded-xl border border-ink-700 bg-ink-850/70 p-3.5">

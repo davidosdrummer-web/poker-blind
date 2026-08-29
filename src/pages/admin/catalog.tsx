@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Archive, ArrowRight, Copy, CrownIcon, Pencil, Plus, Trash2, Trophy } from "lucide-react";
+import { Archive, ArrowRight, Copy, Pencil, Plus, Trash2, Trophy } from "lucide-react";
 import { actions } from "../../lib/store";
 import { useDB } from "../../lib/hooks";
 import type { Season } from "../../types";
@@ -213,4 +213,4 @@ export function SeasonsPage() {
   );
 }
 
-export { CrownIcon, StatusBadge };
+

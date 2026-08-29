@@ -15,7 +15,7 @@ import {
    Точка подмены на реальный Firebase — mutate()/load().
    ============================================================ */
 
-const LS_KEY = "goldentuz_db_v5";
+const LS_KEY = "goldentuz_db_v6";
 const SS_KEY = "goldentuz_uid";
 const BC_NAME = "goldentuz_sync_v5";
 
@@ -157,6 +157,22 @@ function findFreeSeat(t: Tournament): { table: number; seat: number } | null {
     if (i >= 0) return { table: tb.number, seat: i };
   }
   return null;
+}
+
+/**
+ * Общий финальный стол: когда за столами остаётся <= finalTableAt игроков,
+ * все они сводятся за один стол (isFinal) — именно его показывает ТВ-экран «Финал».
+ */
+function formFinalTableIfNeeded(db: DB, t: Tournament) {
+  if (t.finalTableAt <= 0) return;
+  if (t.tables.some((tb) => tb.isFinal)) return; // уже сформирован
+  const rem: string[] = [];
+  for (const tb of t.tables) for (const s of tb.seats) if (s) rem.push(s);
+  if (rem.length === 0 || rem.length > t.finalTableAt) return;
+  const seats: (string | null)[] = Array(t.finalTableAt).fill(null);
+  rem.forEach((u, i) => { seats[i] = u; });
+  t.tables = [{ number: 1, isFinal: true, capacity: t.finalTableAt, seats }];
+  notice(db, "all", `«${t.name}»: сформирован финальный стол — ${rem.length} ${rem.length === 1 ? "игрок" : "игроков"}`, "win");
 }
 
 function seasonPoints(db: DB, seasonId: string): Map<string, number> {
@@ -641,6 +657,7 @@ export const actions = {
       const name = nicknameOf(db, userId);
       if (killerId) notice(db, "all", `Нокаут! ${nicknameOf(db, killerId)} выбивает ${name}`, "alert");
       else notice(db, "all", `${name} покидает турнир (блайнды)`, "info");
+      formFinalTableIfNeeded(db, tt);
       if (remainingCount(tt) === 1) notice(db, "all", `«${tt.name}»: остался один игрок — фиксируйте результат`, "win");
     });
     return null;
@@ -806,11 +823,11 @@ export const actions = {
         lateRegMinutes: 30, lateRegUntil: null,
         bonusDefs: [{ name: "Чип-бонус", chips: 10000 }],
         scoring: { grid: [], participation: 0, knockoutPoints: 0, knockoutEnabled: false },
+        nonScoring: true, finalTableAt: 9,
         status: "registration", regOpen: false,
         currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
         registrations: top.map((userId) => ({ userId, status: "checked-in" as const, registeredAt: Date.now(), checkedInAt: Date.now() })),
         tables, knockouts: [], rebuys: [], bonuses: [], results: null,
-        nonScoring: true,
         createdBy: sessionUid ?? "u_admin", createdAt: Date.now(),
       });
       notice(db, "all", `Сформирован финал сезона «${season.name}» — топ-18 в списке`, "win");

@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarRange, CrownIcon, Swords, Trophy, Users } from "lucide-react";
+import { ArrowLeft, CalendarRange, Swords, Trophy, Users } from "lucide-react";
 import { actions } from "../../lib/store";
 import { useDB } from "../../lib/hooks";
 import { computeBoard, cx, fmtDate, fmtNum, fullName, scoringText } from "../../lib/formulas";
 import { Avatar, Badge, Button, Card, EmptyState, Modal, toast } from "../../components/ui";
 import { PageHeader, StatusBadge } from "../../components/shared";
-import { Spade, SuitsRow } from "../../components/icons";
+import { CrownIcon, Spade, SuitsRow } from "../../components/icons";
 import { nextSort, SortHead, type SortState } from "./ratings";
 
 export default function SeasonPage() {

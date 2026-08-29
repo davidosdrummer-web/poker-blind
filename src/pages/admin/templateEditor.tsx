@@ -236,7 +236,7 @@ export default function TemplateEditorPage() {
 
         {/* СТОЛЫ (конфигурация по умолчанию) */}
         <section id="tpl-tables" className="scroll-mt-40">
-          <SectionTitle icon={<LayoutTemplate size={15} />} title="Столы" sub={`${draft.tables.length} столов по умолчанию · ${totalSeats(draft as unknown as { tables: TableState[] })} мест`} />
+          <SectionTitle icon={<LayoutTemplate size={15} />} title="Столы" sub={`${draft.tables.length} столов по умолчанию · ${totalSeats(draft)} мест`} />
           <Card className="p-5">
             <TablesEditor
               tables={draft.tables}

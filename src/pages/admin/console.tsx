@@ -115,6 +115,18 @@ function LiveConsole({ t, db }: { t: Tournament; db: DB }) {
     <div>
       <PageHeader kicker="пульт · живой турнир" title={t.name}>
         <StatusBadge status={t.status} />
+        {(() => {
+          const hasFinal = t.tables.some((tb) => tb.isFinal);
+          if (hasFinal) return <Badge tone="gold" dot>финальный стол</Badge>;
+          if (t.finalTableAt > 0) {
+            return (
+              <Badge tone="ink" title={`Финальный стол сформируется при ${t.finalTableAt} оставшихся игроках`}>
+                финал: осталось {remaining} → {t.finalTableAt}
+              </Badge>
+            );
+          }
+          return null;
+        })()}
         <div className={cx(
           "flex items-center gap-2 rounded-lg border px-3 py-1.5",
           lateOpen ? "border-gold-500/40 bg-gold-500/10" : "border-ink-700 bg-ink-850/70",

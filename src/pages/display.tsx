@@ -6,7 +6,7 @@ import { liveTournament, REBUY_LABELS } from "../lib/store";
 import type { DB, Tournament } from "../types";
 import {
   averageStack, breakRemainingMs, chipBreakdown, cx, fmtChips, fmtClock, fmtNum,
-  fullName, levelDurationMs, levelRemainingMs, plural, remainingCount, seatedPlayers,
+  fullName, levelDurationMs, levelRemainingMs, plural, remainingCount,
 } from "../lib/formulas";
 import { CrownIcon, SuitsRow } from "../components/icons";
 
@@ -84,13 +84,20 @@ export default function DisplayShell() {
         <div className="flex items-center gap-3">
           <Clock />
           <nav className="hidden items-center gap-1 rounded-lg border border-ink-700 bg-ink-800/70 p-1 lg:flex">
-            {[["main", "Главный"], ["final", "Финал"], ["results", "Итоги"]].map(([m, label]) => (
-              <Link key={m} to={`/display/${m}${t ? `?t=${t.id}` : ""}`}
-                className={cx("rounded-md px-3 py-1 text-xs font-bold transition-all", mode === m ? "bg-gold-500 text-ink-950" : "text-ink-300 hover:text-cream-100")}
-              >
-                {label}
-              </Link>
-            ))}
+            {[["main", "Главный"], ["final", "Финал"], ["results", "Итоги"]].map(([m, label]) => {
+              const finalReady = m === "final" && !!t?.tables.some((tb) => tb.isFinal);
+              return (
+                <Link key={m} to={`/display/${m}${t ? `?t=${t.id}` : ""}`}
+                  className={cx(
+                    "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-bold transition-all",
+                    mode === m ? "bg-gold-500 text-ink-950" : "text-ink-300 hover:text-cream-100",
+                  )}
+                >
+                  {finalReady && mode !== m && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-felt-300" />}
+                  {label}
+                </Link>
+              );
+            })}
           </nav>
           <button onClick={toggle} className="rounded-lg border border-ink-600 p-2 text-ink-300 transition-colors hover:border-gold-500/60 hover:text-gold-300" title="Во весь экран">
             <Maximize2 size={16} />
@@ -217,6 +224,30 @@ function MainScreen({ db, t }: { db: DB; t: Tournament }) {
             />
           </div>
         </div>
+
+        {/* будущие блайнды */}
+        {t.levels.length > t.currentLevel + 1 && (
+          <div className="w-full max-w-3xl">
+            <div className="mb-2 text-center font-mono text-[10px] uppercase tracking-[0.3em] text-ink-400">будущие блайнды</div>
+            <div className="flex flex-wrap items-stretch justify-center gap-2">
+              {t.levels.slice(t.currentLevel + 1, t.currentLevel + 5).map((l, i) => (
+                <div
+                  key={t.currentLevel + 1 + i}
+                  className={cx(
+                    "min-w-[104px] rounded-lg border px-3.5 py-2 text-center backdrop-blur-sm",
+                    i === 0 ? "border-gold-500/45 bg-gold-500/10" : "border-ink-700 bg-ink-900/50",
+                  )}
+                >
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-ink-500">ур. {t.currentLevel + 2 + i}</div>
+                  <div className={cx("tabular font-mono text-base font-bold", i === 0 ? "text-gold-200" : "text-cream-100")}>
+                    {fmtNum(l.sb)}/{fmtNum(l.bb)}
+                  </div>
+                  <div className="font-mono text-[9px] text-ink-500">{l.ante > 0 ? `анте ${fmtNum(l.ante)} · ` : ""}{l.duration} мин</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="hidden flex-col justify-center gap-4 lg:flex">
@@ -260,8 +291,51 @@ function MainScreen({ db, t }: { db: DB; t: Tournament }) {
 function FinalScreen({ db, t }: { db: DB; t: Tournament }) {
   const now = useNow(500);
   const lvl = t.levels[Math.min(t.currentLevel, t.levels.length - 1)];
-  const players = useMemo(() => seatedPlayers(t).slice(0, 9), [t]);
+  const finalTable = t.tables.find((tb) => tb.isFinal);
+  const players = useMemo(
+    () => (finalTable ? (finalTable.seats.filter(Boolean) as string[]).slice(0, 10) : []),
+    [finalTable],
+  );
   const bd = chipBreakdown(t);
+  const remaining = remainingCount(t);
+
+  /* финальный стол показывается только после того, как он сформирован в турнире */
+  if (!finalTable) {
+    return (
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-5 px-8 text-center">
+        <CrownIcon size={52} className="text-ink-600" />
+        <div className="font-display text-[min(4vw,34px)] font-extrabold text-cream-100">
+          Финальный стол ещё не сформирован
+        </div>
+        {t.finalTableAt > 0 ? (
+          <>
+            <div className="max-w-xl text-lg leading-relaxed text-ink-300">
+              Он появится автоматически, когда за столами останется{" "}
+              <b className="tabular font-mono text-gold-300">{t.finalTableAt}</b>{" "}
+              {plural(t.finalTableAt, ["игрок", "игрока", "игроков"])}
+            </div>
+            <div className="w-full max-w-md">
+              <div className="mb-2 flex justify-between font-mono text-xs text-ink-400">
+                <span>сейчас в игре: <b className="tabular text-felt-300">{remaining}</b></span>
+                <span>финал: <b className="tabular text-gold-300">{t.finalTableAt}</b></span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-ink-700">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-felt-500 to-gold-400 transition-all duration-1000"
+                  style={{ width: `${Math.max(4, Math.min(100, (remaining / Math.max(1, t.registrations.length)) * 100))}%` }}
+                />
+              </div>
+            </div>
+            <div className="font-mono text-xs text-ink-500">экран обновится сам — без перезагрузки</div>
+          </>
+        ) : (
+          <div className="max-w-xl text-lg leading-relaxed text-ink-400">
+            Для турнира «{t.name}» финальный стол не настроен
+          </div>
+        )}
+      </div>
+    );
+  }
   const kosOf = (uidv: string) => t.knockouts.filter((k) => k.killerId === uidv).length;
   const retOf = (uidv: string) => t.rebuys.filter((r) => r.userId === uidv && (r.kind === "reentry" || r.kind === "lastchance")).length;
 

@@ -12,6 +12,8 @@ import ControlPage from "./pages/admin/control";
 import PlayersPage from "./pages/admin/players";
 import RatingsPage from "./pages/admin/ratings";
 import { TemplatesPage, SeasonsPage } from "./pages/admin/catalog";
+import TemplateEditorPage from "./pages/admin/templateEditor";
+import SeasonPage from "./pages/admin/season";
 import { DisplaysPage, SettingsPage } from "./pages/admin/ops";
 import PlayerCabinet from "./pages/player";
 
@@ -56,7 +58,10 @@ export default function App() {
           <Route path="players" element={<PlayersPage />} />
           <Route path="ratings" element={<RatingsPage />} />
           <Route path="templates" element={<TemplatesPage />} />
+          <Route path="templates/new" element={<TemplateEditorPage />} />
+          <Route path="templates/:id/edit" element={<TemplateEditorPage />} />
           <Route path="seasons" element={<SeasonsPage />} />
+          <Route path="seasons/:id" element={<SeasonPage />} />
           <Route path="displays" element={<DisplaysPage />} />
           <Route
             path="settings"
