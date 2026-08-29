@@ -998,35 +998,86 @@ export const actions = {
     return null;
   },
 
+  // ---------- БОНУСЫ (ИСПРАВЛЕННАЯ ВЕРСИЯ) ----------
   async addBonus(tId: string, userId: string, name: string, chips: number): Promise<string | null> {
+    console.log('🔵 addBonus() вызвана для турнира', tId);
+    console.log('🔵 Параметры:', { userId, name, chips });
+    
     const t = findTournament(state, tId);
-    if (!t) return 'Турнир не найден';
-    if (!isLive(t)) return 'Бонусы раздаются только во время игры';
-    if (!name.trim()) return 'Укажите название бонуса';
-    if (!chips || chips <= 0) return 'Укажите количество фишек';
-    if (isEliminated(t, userId)) return 'Игрок уже выбыл — бонус недоступен';
+    if (!t) {
+      console.error('❌ Турнир не найден');
+      return 'Турнир не найден';
+    }
+    
+    if (!isLive(t)) {
+      console.error('❌ Турнир не активен, статус:', t.status);
+      return 'Бонусы раздаются только во время игры';
+    }
+    
+    if (!name.trim()) {
+      console.error('❌ Нет названия бонуса');
+      return 'Укажите название бонуса';
+    }
+    
+    if (!chips || chips <= 0) {
+      console.error('❌ Неверное количество фишек:', chips);
+      return 'Укажите количество фишек';
+    }
+    
+    if (isEliminated(t, userId)) {
+      console.error('❌ Игрок уже выбыл:', userId);
+      return 'Игрок уже выбыл — бонус недоступен';
+    }
 
+    console.log('🔵 Получаем состояние из Realtime DB...');
     const stateData = await realtime.getTournamentState(tId);
-    if (!stateData) return 'Состояние не найдено';
+    if (!stateData) {
+      console.error('❌ Состояние не найдено в Realtime DB');
+      return 'Состояние не найдено';
+    }
 
-    const bonuses = [...(stateData.bonuses || []), { 
+    const newBonus = { 
       id: uid('bn'), 
       userId, 
       name: name.trim(), 
       chips: Math.round(chips), 
       at: Date.now() 
-    }];
+    };
+    
+    const bonuses = [...(stateData.bonuses || []), newBonus];
 
-    await realtime.updateTournamentState(tId, { bonuses });
+    console.log('🔵 Сохраняем бонусы в Realtime DB...', bonuses);
+    
+    try {
+      await realtime.updateTournamentState(tId, { bonuses });
+      console.log('✅ Бонусы сохранены в Realtime DB');
+    } catch (error) {
+      console.error('❌ Ошибка сохранения бонусов в Realtime DB:', error);
+      return 'Ошибка сохранения бонуса';
+    }
     
     // Обновляем локальное состояние
     const updatedT = findTournament(state, tId);
     if (updatedT) {
       updatedT.bonuses = bonuses;
+      console.log('✅ Локальное состояние обновлено');
+    }
+    
+    // Сохраняем в Firestore для истории
+    try {
+      await firestore.tournamentsMeta.update(tId, { 
+        bonuses: bonuses 
+      });
+      console.log('✅ Бонусы сохранены в Firestore');
+    } catch (error) {
+      console.error('❌ Ошибка сохранения бонусов в Firestore:', error);
+      // Не возвращаем ошибку, так как в Realtime уже сохранили
     }
     
     notice(state, 'all', `${nicknameOf(state, userId)} получает бонус «${name}»: +${chips.toLocaleString('ru-RU')} фишек в банк`, 'win');
+    emit(); // Уведомляем подписчиков
 
+    console.log('✅ Бонус успешно выдан!');
     return null;
   },
 
@@ -1389,7 +1440,7 @@ export const actions = {
 };
 
 // ============================================================
-//  ЭКСПОРТЫ (ТОЛЬКО ОДИН РАЗ)
+//  ЭКСПОРТЫ
 // ============================================================
 
 export function subscribeStore(fn: () => void): () => void {
@@ -1405,7 +1456,7 @@ export function getVersion(): number {
   return version;
 }
 
-// Единая функция для получения sessionUid (асинхронная)
+// Асинхронная версия для получения сессии
 export async function getSessionUid(): Promise<string | null> {
   if (!authInitialized) {
     const user = await waitForAuth();
@@ -1425,7 +1476,7 @@ export async function getSessionUid(): Promise<string | null> {
   return sessionUid;
 }
 
-// Синхронная версия для быстрого доступа — ЭТО ЕДИНСТВЕННОЕ ОБЪЯВЛЕНИЕ
+// Синхронная версия для быстрого доступа
 export function getSessionUidSync(): string | null {
   return sessionUid;
 }

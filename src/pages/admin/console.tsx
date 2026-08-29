@@ -1,5 +1,5 @@
 // src/pages/admin/console.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Coffee, ExternalLink, Flag, Gift, Minus, MonitorPlay,
@@ -27,7 +27,16 @@ const RETURN_KINDS: Array<{ kind: RebuyKind; desc: string }> = [
 export default function ConsolePage() {
   const db = useDB();
   const navigate = useNavigate();
+  const [refreshKey, setRefreshKey] = useState(0);
   const t = liveTournament(db);
+  
+  // Принудительное обновление при изменении данных
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshKey(prev => prev + 1);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (!t) {
     return (
@@ -46,10 +55,16 @@ export default function ConsolePage() {
       </div>
     );
   }
-  return <LiveConsole t={t} db={db} navigate={navigate} />;
+  
+  return <LiveConsole key={refreshKey} t={t} db={db} navigate={navigate} onRefresh={() => setRefreshKey(prev => prev + 1)} />;
 }
 
-function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (path: string) => void }) {
+function LiveConsole({ t, db, navigate, onRefresh }: { 
+  t: Tournament; 
+  db: DB; 
+  navigate: (path: string) => void;
+  onRefresh: () => void;
+}) {
   const now = useNow(1000);
   const lvl = t.levels[Math.min(t.currentLevel, t.levels.length - 1)];
   const isBreak = t.status === "break";
@@ -72,30 +87,52 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
   const [bnChips, setBnChips] = useState(5000);
   const [returnFor, setReturnFor] = useState<string | null>(null);
   const [isFinishing, setIsFinishing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const eliminated = useMemo(() => [...t.knockouts].reverse(), [t.knockouts]);
   const nick = (uidv: string | null) => (uidv ? db.users.find((u) => u.id === uidv)?.nickname ?? "—" : "блайнды");
 
-  // Движок: автоповышение блайндов + выход с перерыва
+  // Автоматическое повышение блайндов
   useEffect(() => {
-    if (t.status === "active" && t.levelStartedAt != null && levelRemainingMs(t, now) <= 0 && t.currentLevel < t.levels.length - 1) {
-      const err = actions.nextLevel(t.id);
-      if (err) toast(err, "err");
-      else toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
+    if (t.status === "active" && t.levelStartedAt != null) {
+      const remaining = levelRemainingMs(t, now);
+      if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
+        console.log('🔵 Автоматическое повышение уровня...');
+        const err = actions.nextLevel(t.id);
+        if (err) {
+          toast(err, "err");
+        } else {
+          toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
+          onRefresh();
+        }
+      }
     }
+    
     if (t.status === "break" && t.breakEndsAt != null && now >= t.breakEndsAt) {
+      console.log('🔵 Автоматический выход с перерыва...');
       actions.endBreak(t.id);
       toast("Перерыв завершён — игра продолжается", "info");
+      onRefresh();
     }
   }, [now, t.id, t.status, t.levelStartedAt, t.breakEndsAt, t.currentLevel, t.levels.length]);
 
   const togglePause = async () => {
-    if (t.status === "active") { 
-      await actions.pauseTournament(t.id); 
-      toast("Таймер остановлен", "info"); 
-    } else if (t.status === "paused") { 
-      await actions.resumeTournament(t.id); 
-      toast("Игра возобновлена", "ok"); 
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      if (t.status === "active") { 
+        await actions.pauseTournament(t.id); 
+        toast("Таймер остановлен", "info"); 
+        onRefresh();
+      } else if (t.status === "paused") { 
+        await actions.resumeTournament(t.id); 
+        toast("Игра возобновлена", "ok"); 
+        onRefresh();
+      }
+    } catch (error: any) {
+      toast("Ошибка: " + error.message, "err");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -104,17 +141,21 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
     n: () => { 
       const err = actions.nextLevel(t.id); 
       if (err) toast(err, "err"); 
+      else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
     },
-    p: () => actions.prevLevel(t.id),
+    p: () => { actions.prevLevel(t.id); onRefresh(); },
     b: () => { 
       if (t.status === "active") { 
         actions.startBreak(t.id, breakMin); 
         toast(`Перерыв ${breakMin} мин`, "info"); 
+        onRefresh();
       } 
     },
   });
 
   const doReturn = async (userId: string, kind: RebuyKind) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
     try {
       const err = await actions.addRebuy(t.id, userId, kind);
       if (err) { 
@@ -123,8 +164,11 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
       }
       toast(`${nick(userId)}: ${REBUY_LABELS[kind]} — фишки в банке`, "ok");
       setReturnFor(null);
+      onRefresh();
     } catch (error: any) {
       toast("Ошибка: " + (error.message || "неизвестная"), "err");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -137,7 +181,6 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
         toast(err, "err");
       } else {
         toast("Результаты опубликованы — очки начислены", "ok");
-        // Переход на страницу турнира для просмотра результатов
         navigate(`/admin/tournaments/${t.id}`);
       }
     } catch (error: any) {
@@ -145,6 +188,52 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
     } finally {
       setIsFinishing(false);
       setModal("");
+    }
+  };
+
+  const handleAddBonus = async () => {
+    if (isProcessing) return;
+    if (!bnUser) {
+      toast("Выберите игрока", "err");
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const err = await actions.addBonus(t.id, bnUser, bnName, bnChips);
+      if (err) {
+        toast(err, "err");
+      } else {
+        toast(`Бонус выдан: +${fmtNum(bnChips)} фишек в банк`, "ok");
+        onRefresh();
+        setModal("");
+      }
+    } catch (error: any) {
+      toast("Ошибка: " + (error.message || "неизвестная"), "err");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleEliminate = async () => {
+    if (isProcessing) return;
+    if (!koVictim) {
+      toast("Выберите игрока", "err");
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const err = await actions.eliminate(t.id, koVictim, koKiller || null);
+      if (err) {
+        toast(err, "err");
+      } else {
+        toast(`${nick(koVictim)} выбыл — появился в блоке «Выбывшие»`, "info");
+        onRefresh();
+        setModal("");
+      }
+    } catch (error: any) {
+      toast("Ошибка: " + (error.message || "неизвестная"), "err");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -184,6 +273,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
           <button onClick={() => { 
             actions.adjustLateReg(t.id, 15); 
             toast("Поздняя регистрация +15 мин", "info"); 
+            onRefresh();
           }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-gold-500 hover:text-ink-950">
             +15 мин
           </button>
@@ -191,6 +281,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
             <button onClick={() => { 
               actions.adjustLateReg(t.id, -99999); 
               toast("Поздняя регистрация закрыта", "info"); 
+              onRefresh();
             }} className="rounded-md bg-ink-700 px-2 py-0.5 font-mono text-[10px] font-bold text-cream-100 transition-colors hover:bg-danger-500">
               закрыть
             </button>
@@ -238,11 +329,12 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                 <Button variant="felt" onClick={() => { 
                   actions.endBreak(t.id); 
                   toast("Перерыв завершён", "ok"); 
+                  onRefresh();
                 }}>
                   <Play size={15} /> С перерыва
                 </Button>
               ) : (
-                <Button variant={t.status === "paused" ? "felt" : "dark"} onClick={togglePause}>
+                <Button variant={t.status === "paused" ? "felt" : "dark"} onClick={togglePause} disabled={isProcessing}>
                   {t.status === "paused" ? <><Play size={15} /> Продолжить</> : <><Pause size={15} /> Пауза</>}
                 </Button>
               )}
@@ -250,32 +342,35 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                 <Select value={String(breakMin)} onChange={(e) => setBreakMin(Number(e.target.value))} className="w-[76px] px-2 text-xs">
                   {[10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} мин</option>)}
                 </Select>
-                <Button variant="outline" className="flex-1" disabled={isBreak} onClick={() => { 
+                <Button variant="outline" className="flex-1" disabled={isBreak || isProcessing} onClick={() => { 
                   actions.startBreak(t.id, breakMin); 
                   toast(`Перерыв ${breakMin} мин`, "info"); 
+                  onRefresh();
                 }}>
                   <Coffee size={14} /> Перерыв
                 </Button>
               </div>
-              <Button variant="dark" disabled={t.currentLevel === 0} onClick={() => actions.prevLevel(t.id)}>
+              <Button variant="dark" disabled={t.currentLevel === 0} onClick={() => { actions.prevLevel(t.id); onRefresh(); }}>
                 <ArrowLeft size={14} /> Пред. уровень
               </Button>
               <Button variant="dark" onClick={() => { 
                 const err = actions.nextLevel(t.id); 
                 if (err) toast(err, "err"); 
-                else toast(`Уровень ${t.currentLevel + 2}`, "info"); 
+                else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
               }}>
                 След. уровень <ArrowRight size={14} />
               </Button>
               <Button variant="outline" onClick={() => { 
                 actions.adjustTimer(t.id, -60); 
                 toast("−1 минута", "info"); 
+                onRefresh();
               }}>
                 <Minus size={14} /> 1 мин
               </Button>
               <Button variant="outline" onClick={() => { 
                 actions.adjustTimer(t.id, 60); 
                 toast("+1 минута", "info"); 
+                onRefresh();
               }}>
                 <Plus size={14} /> 1 мин
               </Button>
@@ -286,7 +381,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                 setKoVictim(seated[0] ?? ""); 
                 setKoKiller(""); 
                 setModal("ko"); 
-              }}>
+              }} disabled={isProcessing}>
                 <CrosshairIcon size={15} /> Выбивание
               </Button>
               <Button onClick={() => { 
@@ -294,10 +389,10 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                 setBnName(t.bonusDefs?.[0]?.name ?? "Чип-бонус"); 
                 setBnChips(t.bonusDefs?.[0]?.chips ?? Math.max(1000, lvl.bb * 10)); 
                 setModal("bonus"); 
-              }}>
+              }} disabled={isProcessing}>
                 <Gift size={15} /> Бонус
               </Button>
-              <Button variant="ghost" onClick={() => setModal("finish")}>
+              <Button variant="ghost" onClick={() => setModal("finish")} disabled={isProcessing}>
                 <Flag size={15} /> Завершить
               </Button>
             </div>
@@ -326,6 +421,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                           if (err) break; 
                         } 
                         while (idx < t.currentLevel) actions.prevLevel(t.id); 
+                        onRefresh();
                       }}
                       className={cx(
                         "flex w-full items-center gap-2.5 rounded-lg border px-3 py-1.5 text-left transition-all",
@@ -347,7 +443,6 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
           </Card>
         </div>
 
-        {/* правая колонка */}
         <div className="grid min-w-0 content-start gap-5 lg:grid-cols-2">
           <Card className="p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-gold-500">
@@ -392,7 +487,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                     </span>
                     <Button
                       size="xs" variant="outline"
-                      disabled={!lateOpen}
+                      disabled={!lateOpen || isProcessing}
                       onClick={() => setReturnFor(returnFor === k.userId ? null : k.userId)}
                       title={lateOpen ? "Вернуть в игру" : "Возврат возможен, пока открыта поздняя регистрация"}
                     >
@@ -406,6 +501,7 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
                           key={rk.kind}
                           onClick={() => doReturn(k.userId, rk.kind)}
                           className="rounded-lg border border-ink-600 bg-ink-900/70 px-2 py-1.5 text-left transition-all hover:border-gold-500/60 hover:bg-gold-500/10"
+                          disabled={isProcessing}
                         >
                           <span className="block text-[11px] font-bold text-gold-200">
                             {REBUY_LABELS[rk.kind]} <span className="tabular ml-1 font-mono text-[10px] text-felt-300">+{fmtChips(injectionChips(t, rk.kind))}</span>
@@ -445,6 +541,8 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
         </div>
       </div>
 
+      {/* Модальные окна */}
+      
       {/* Выбивание */}
       <Modal open={modal === "ko"} onClose={() => setModal("")} title="Отметить выбывание">
         <div className="space-y-4">
@@ -461,15 +559,10 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
           </Field>
           <Button
             variant="danger" className="w-full" size="lg"
-            onClick={() => {
-              if (!koVictim) { toast("Выберите игрока", "err"); return; }
-              const err = actions.eliminate(t.id, koVictim, koKiller || null);
-              if (err) toast(err, "err");
-              else toast(`${nick(koVictim)} выбыл — появился в блоке «Выбывшие»`, "info");
-              setModal("");
-            }}
+            onClick={handleEliminate}
+            disabled={isProcessing}
           >
-            <CrosshairIcon size={15} /> Подтвердить выбывание
+            <CrosshairIcon size={15} /> {isProcessing ? "Обработка..." : "Подтвердить выбывание"}
           </Button>
         </div>
       </Modal>
@@ -511,15 +604,10 @@ function LiveConsole({ t, db, navigate }: { t: Tournament; db: DB; navigate: (pa
           </div>
           <Button
             className="w-full" size="lg"
-            onClick={() => {
-              if (!bnUser) { toast("Выберите игрока", "err"); return; }
-              const err = actions.addBonus(t.id, bnUser, bnName, bnChips);
-              if (err) toast(err, "err");
-              else toast(`Бонус выдан: +${fmtNum(bnChips)} фишек в банк`, "ok");
-              setModal("");
-            }}
+            onClick={handleAddBonus}
+            disabled={isProcessing}
           >
-            <Gift size={15} /> Выдать бонус
+            <Gift size={15} /> {isProcessing ? "Обработка..." : "Выдать бонус"}
           </Button>
         </div>
       </Modal>
