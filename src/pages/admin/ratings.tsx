@@ -114,17 +114,16 @@ export default function RatingsPage() {
                   <th className="px-3 py-2.5 text-center"><SortHead label="Игр" k="events" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
                   <th className="px-3 py-2.5 text-center"><SortHead label="Побед" k="wins" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
                   <th className="px-3 py-2.5 text-center"><SortHead label="Топ-3" k="top3" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
-                  <th className="px-3 py-2.5 text-center"><SortHead label="Финалок" k="finalTables" sort={sort} onSort={(k) => setSort(nextSort(nextSort(sort, k), k))} align="center" /></th>
+                  <th className="px-3 py-2.5 text-center"><SortHead label="Финалок" k="finalTables" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" /></th>
                   <th className="px-3 py-2.5 text-right"><SortHead label="Лучший" k="bestPoints" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="right" title="Лучший результат очков за один турнир" /></th>
                   <th className="px-3 py-2.5 text-center"><SortHead label="Выбил" k="knockouts" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" title="Сколько игроков выбил" /></th>
                   <th className="px-4 py-2.5 text-center"><SortHead label="Докупов" k="returns" sort={sort} onSort={(k) => setSort(nextSort(sort, k))} align="center" title="Сколько раз делал докупы (возвращения)" /></th>
                 </tr>
               </thead>
               <tbody>
-                {board.map((r) => {
+                {sorted.map((r) => {
                   const u = db.users.find((x) => x.id === r.userId);
                   if (!u) return null;
-                  const medal = r.rank <= 3;
                   return (
                     <tr key={r.userId} className={cx(
                       "border-b border-ink-700/40 transition-colors last:border-0 hover:bg-ink-800/60",
@@ -167,8 +166,41 @@ export default function RatingsPage() {
       </Card>
 
       <p className="mt-4 text-center text-[11px] text-ink-500">
-        Место · Никнейм · Имя Фамилия · Очки · Игры · Победы · Топ-3 · Финальные столы · Лучший результат за турнир · Выбито игроков · Докупы (возвращения)
+        Кликните по заголовку столбца, чтобы отсортировать · вся статистика накапливается из итогов турниров
       </p>
     </div>
+  );
+}
+
+/* ---------------- сортировка ---------------- */
+
+export interface SortState { k: string; dir: 1 | -1 }
+
+export function nextSort(cur: SortState, k: string): SortState {
+  if (cur.k !== k) return { k, dir: -1 };
+  return { k, dir: cur.dir === -1 ? 1 : -1 };
+}
+
+export function SortHead({ label, k, sort, onSort, align = "left", title }: {
+  label: string; k: string; sort: SortState;
+  onSort: (k: string) => void; align?: "left" | "right" | "center"; title?: string;
+}) {
+  const active = sort.k === k;
+  return (
+    <button
+      onClick={() => onSort(k)}
+      title={title ?? `Сортировать: ${label.toLowerCase()}`}
+      className={cx(
+        "group inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+        align === "right" && "flex-row-reverse",
+        align === "center" && "mx-auto",
+        active ? "text-gold-300" : "text-ink-400 hover:text-cream-100",
+      )}
+    >
+      {label}
+      <span className={cx("font-mono text-[9px] transition-all", active ? "opacity-100" : "opacity-0 group-hover:opacity-50")}>
+        {active && sort.dir === 1 ? "▲" : "▼"}
+      </span>
+    </button>
   );
 }

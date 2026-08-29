@@ -722,7 +722,8 @@ export const actions = {
         const rb = tt.rebuys.filter((r) => r.userId === userId && r.kind !== "addon").length;
         const ad = tt.rebuys.filter((r) => r.userId === userId && r.kind === "addon").length;
         const ret = tt.rebuys.filter((r) => r.userId === userId && (r.kind === "reentry" || r.kind === "lastchance")).length;
-        return { userId, place, points: scoreForPlace(tt.scoring, place, ko), knockouts: ko, rebuys: rb, addons: ad, returns: ret };
+        const pts = tt.nonScoring ? 0 : scoreForPlace(tt.scoring, place, ko);
+        return { userId, place, points: pts, knockouts: ko, rebuys: rb, addons: ad, returns: ret };
       });
       tt.results = results;
       tt.status = "finished";
@@ -762,7 +763,7 @@ export const actions = {
   createSeasonFinal(seasonId: string): string | null {
     const season = state.seasons.find((x) => x.id === seasonId);
     if (!season) return "Сезон не найден";
-    if (state.tournaments.some((t) => t.seasonFinal && t.seasonId === seasonId)) return "Финальный турнир сезона уже создан";
+    if (state.tournaments.some((t) => t.nonScoring && t.seasonId === seasonId)) return "Финальный турнир сезона уже создан";
     const board = computeBoard(state, seasonId);
     const top = board.slice(0, 18).map((b) => b.userId);
     if (top.length < 2) return "В зачёте сезона меньше двух игроков — финал невозможен";
@@ -809,7 +810,7 @@ export const actions = {
         currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
         registrations: top.map((userId) => ({ userId, status: "checked-in" as const, registeredAt: Date.now(), checkedInAt: Date.now() })),
         tables, knockouts: [], rebuys: [], bonuses: [], results: null,
-        seasonFinal: true,
+        nonScoring: true,
         createdBy: sessionUid ?? "u_admin", createdAt: Date.now(),
       });
       notice(db, "all", `Сформирован финал сезона «${season.name}» — топ-18 в списке`, "win");

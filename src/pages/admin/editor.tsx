@@ -38,6 +38,7 @@ function blankTournament(db: DB): Tournament {
     lateRegMinutes: 45, lateRegUntil: null,
     bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
     scoring: JSON.parse(JSON.stringify(sc)),
+    nonScoring: false,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: [], tables: [], knockouts: [], rebuys: [], bonuses: [], results: null,

@@ -1,7 +1,15 @@
 import type {
-  BlindLevel, DB, ResultEntry, ScoringConfig, Season, Template, Tournament, User, UserStats,
+  BlindLevel, DB, ResultEntry, ScoringConfig, Season, TableState, Template, Tournament, User, UserStats,
 } from "../types";
 import { defaultGrid, defaultScoring, scoreForPlace } from "./formulas";
+
+/** конфигурация столов по умолчанию: по 9 мест */
+function defaultTables(maxPlayers: number): TableState[] {
+  const n = Math.max(2, Math.ceil(maxPlayers / 9));
+  return Array.from({ length: n }, (_, i) => ({
+    number: i + 1, isFinal: false, capacity: 9, seats: Array(9).fill(null) as (string | null)[],
+  }));
+}
 
 /* Детерминированный ГПСЧ — демо-данные одинаковы при каждом пересоздании. */
 let s = 20260212;
@@ -133,6 +141,7 @@ function buildTemplates(): Template[] {
       rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
       lateRegMinutes: 45, bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
       scoring: { ...sc, grid: defaultGrid() },
+      tables: defaultTables(45),
     },
     {
       id: "tpl_bounty", name: "Баунти Хантер", type: "bounty",
@@ -142,6 +151,7 @@ function buildTemplates(): Template[] {
       rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
       lateRegMinutes: 40, bonusDefs: [{ name: "Бонус за баунти", chips: 3000 }, { name: "Чип-бонус", chips: 5000 }],
       scoring: { grid: defaultGrid(), participation: 10, knockoutPoints: 8, knockoutEnabled: true },
+      tables: defaultTables(36),
     },
     {
       id: "tpl_rebuy", name: "Ребай-Марафон", type: "rebuy",
@@ -151,6 +161,7 @@ function buildTemplates(): Template[] {
       rebuyAllowed: true, maxRebuys: 3, rebuyCostChips: 10000, rebuyUntilLevel: 5,
       lateRegMinutes: 60, bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
       scoring: { ...sc, grid: defaultGrid() },
+      tables: defaultTables(40),
     },
     {
       id: "tpl_turbo", name: "Турбо-Финал", type: "freezeout",
@@ -160,6 +171,7 @@ function buildTemplates(): Template[] {
       rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
       lateRegMinutes: 30, bonusDefs: [],
       scoring: { grid: defaultGrid(), participation: 8, knockoutPoints: 0, knockoutEnabled: false },
+      tables: defaultTables(30),
     },
   ];
 }
@@ -192,7 +204,7 @@ function pastTournament(
     rebuyAllowed: tpl.rebuyAllowed, maxRebuys: tpl.maxRebuys,
     rebuyCostChips: tpl.rebuyCostChips, rebuyUntilLevel: tpl.rebuyUntilLevel,
     lateRegMinutes: tpl.lateRegMinutes, lateRegUntil: null,
-    bonusDefs: tpl.bonusDefs, scoring,
+    bonusDefs: tpl.bonusDefs, scoring, nonScoring: false,
     status: "finished", regOpen: false,
     currentLevel: tpl.levels.length - 1, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: participants.map((userId, i) => ({
@@ -229,7 +241,7 @@ function buildTournaments(): Tournament[] {
     rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
     lateRegMinutes: 40, lateRegUntil: now + 22 * 60_000,
     bonusDefs: [{ name: "Бонус за баунти", chips: 3000 }, { name: "Чип-бонус", chips: 5000 }],
-    scoring: scBounty,
+    scoring: scBounty, nonScoring: false,
     status: "active", regOpen: true,
     currentLevel: 3, levelStartedAt: now - 5.5 * 60_000, pausedRemaining: null, breakEndsAt: null,
     registrations: P(1, 24).map((userId, i) => ({
@@ -263,7 +275,7 @@ function buildTournaments(): Tournament[] {
     rebuyAllowed: false, maxRebuys: 0, rebuyCostChips: 0, rebuyUntilLevel: 0,
     lateRegMinutes: 45, lateRegUntil: null,
     bonusDefs: [{ name: "Чип-бонус", chips: 5000 }],
-    scoring: defaultScoring(),
+    scoring: defaultScoring(), nonScoring: false,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: P(1, 17).map((userId, i) => ({
@@ -286,6 +298,7 @@ function buildTournaments(): Tournament[] {
     lateRegMinutes: 30, lateRegUntil: null,
     bonusDefs: [],
     scoring: { grid: defaultGrid(), participation: 8, knockoutPoints: 0, knockoutEnabled: false },
+    nonScoring: false,
     status: "registration", regOpen: true,
     currentLevel: 0, levelStartedAt: null, pausedRemaining: null, breakEndsAt: null,
     registrations: P(2, 6).map((userId, i) => ({

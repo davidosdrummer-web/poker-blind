@@ -53,7 +53,7 @@ export interface User {
   role: Role;
   /** оттенок аватара, 0–360 */
   hue: number;
-  /** загруженное фото (dataURL), null — инициалы */
+  /** загруженный аватар (dataURL) */
   photoURL: string | null;
   registeredAt: number;
   isBlocked: boolean;
@@ -90,6 +90,8 @@ export interface Template {
   lateRegMinutes: number;
   bonusDefs: BonusDef[];
   scoring: ScoringConfig;
+  /** конфигурация столов по умолчанию */
+  tables: TableState[];
 }
 
 export interface Registration {
@@ -141,6 +143,8 @@ export interface Tournament {
   lateRegUntil: number | null;
   bonusDefs: BonusDef[];
   scoring: ScoringConfig;
+  /** финал сезона: очки не начисляются и не попадают в рейтинги */
+  nonScoring: boolean;
   status: TournamentStatus;
   regOpen: boolean;
   currentLevel: number;
