@@ -2,29 +2,29 @@ import type {
   AchievementDef, DB, DisplayCfg, Notice, RebuyKind, ResultEntry, Role, ScoringConfig, Season,
   SeatAlgo, Template, Tournament, User,
 } from "../types";
-import { buildSeed } from "./seed";
+import { buildInitial } from "./seed";
 import {
   computeBoard, DEFAULT_ACHIEVEMENTS, emptyStats, freshAchievements, isLateRegOpen, itmCutoff,
   levelDurationMs, levelRemainingMs, provisionalResults, remainingCount, scoreForPlace, totalSeats, uid,
 } from "./formulas";
 
 /* ============================================================
-   Центральная БД клуба (демо-аналог Firebase RTDB + Firestore).
-   Состояние живёт в localStorage, мутации мгновенно разносятся
-   по всем вкладкам через BroadcastChannel (onValue-синхронность).
+   Центральная БД клуба. Единое хранилище состояния: мутации
+   мгновенно разносятся по всем вкладкам через BroadcastChannel
+   (onValue-синхронность), персист — в localStorage.
    Точка подмены на реальный Firebase — mutate()/load().
    ============================================================ */
 
-const LS_KEY = "goldentuz_db_v6";
+const LS_KEY = "goldentuz_db_v7";
 const SS_KEY = "goldentuz_uid";
-const BC_NAME = "goldentuz_sync_v5";
+const BC_NAME = "goldentuz_sync_v7";
 
 function isValid(db: unknown): db is DB {
   const d = db as DB | null;
-  return !!d && d.v === 5
-    && Array.isArray(d.users) && d.users.length > 0
-    && typeof d.users[0].firstName === "string" // защита от старых схем
+  return !!d && d.v === 7
+    && Array.isArray(d.users)
     && Array.isArray(d.tournaments) && Array.isArray(d.seasons)
+    && Array.isArray(d.achievements)
     && !!d.settings && !!d.presence;
 }
 
@@ -55,9 +55,9 @@ function load(): DB {
       if (isValid(parsed)) return normalize(parsed);
     }
   } catch { /* повреждённые данные — пересоздаём */ }
-  const seed = buildSeed();
-  try { localStorage.setItem(LS_KEY, JSON.stringify(seed)); } catch { /* quota */ }
-  return seed;
+  const initial = buildInitial();
+  try { localStorage.setItem(LS_KEY, JSON.stringify(initial)); } catch { /* quota */ }
+  return initial;
 }
 
 let state: DB = load();
@@ -232,18 +232,22 @@ export const actions = {
     if (!opts.firstName.trim() || !opts.lastName.trim() || !opts.nickname.trim()) return "Заполните имя, фамилию и никнейм";
     if (state.users.some((x) => x.email.toLowerCase() === em)) return "Этот email уже зарегистрирован";
     const id = uid("u");
+    // Боевой bootstrap: первый аккаунт в пустой базе становится администратором клуба
+    const isFirst = state.users.length === 0;
     mutate((db) => {
       db.users.push({
         id, email: em, password: opts.password,
         firstName: opts.firstName.trim(), lastName: opts.lastName.trim(),
         nickname: opts.nickname.trim(), phone: opts.phone.trim(),
-        role: "player", hue: Math.floor(Math.random() * 360), photoURL: null,
+        role: isFirst ? "admin" : "player",
+        hue: Math.floor(Math.random() * 360), photoURL: null,
         cover: Math.floor(Math.random() * 6),
         registeredAt: Date.now(), isBlocked: false, archived: false, manualPoints: 0,
         stats: emptyStats(), achievements: [],
       });
       touchPresence(db, id);
-      notice(db, "all", `В клубе новый игрок — ${opts.nickname.trim()}!`, "info");
+      if (isFirst) notice(db, "all", `Клуб основан: ${opts.nickname.trim()} — администратор платформы`, "win");
+      else notice(db, "all", `В клубе новый игрок — ${opts.nickname.trim()}!`, "info");
     });
     setSession(id);
     return null;
@@ -924,12 +928,6 @@ export const actions = {
 
   pushNotice(userId: string, text: string, kind: Notice["kind"] = "info") {
     mutate((db) => notice(db, userId, text, kind));
-  },
-
-  reseedAll() {
-    state = buildSeed();
-    persist();
-    emit();
   },
 };
 
