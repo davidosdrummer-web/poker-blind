@@ -1,5 +1,5 @@
 // src/pages/admin/console.tsx
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Coffee, ExternalLink, Flag, Gift, Minus, MonitorPlay,
@@ -80,6 +80,8 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
   const [breakMin, setBreakMin] = useState(15);
   const [modal, setModal] = useState<"" | "ko" | "bonus" | "finish">("");
+  const modalRef = useRef(modal);
+  modalRef.current = modal;
   const [koVictim, setKoVictim] = useState("");
   const [koKiller, setKoKiller] = useState("");
   const [bnUser, setBnUser] = useState("");
@@ -141,16 +143,16 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
   };
 
   useHotkeys({
-    " ": () => { if (modal === "") togglePause(); },
+    " ": () => { if (modalRef.current === "") togglePause(); },
     n: async () => { 
-      if (modal !== "") return;
+      if (modalRef.current !== "") return;
       const err = await actions.nextLevel(t.id); 
       if (err) toast(err, "err"); 
       else { toast(`Уровень ${t.currentLevel + 2}`, "info"); onRefresh(); }
     },
-    p: async () => { if (modal === "") { await actions.prevLevel(t.id); onRefresh(); } },
+    p: async () => { if (modalRef.current === "") { await actions.prevLevel(t.id); onRefresh(); } },
     b: async () => { 
-      if (modal === "" && t.status === "active") { 
+      if (modalRef.current === "" && t.status === "active") { 
         await actions.startBreak(t.id, breakMin); 
         toast(`Перерыв ${breakMin} мин`, "info"); 
         onRefresh();
