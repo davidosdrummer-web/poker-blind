@@ -1,8 +1,8 @@
 // src/lib/hooks.ts
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DB, Tournament, User } from "../types";
-import { actions, getSessionUid, getState, getVersion, subscribeStore } from "./store";
-import { waitForAuth, getCurrentUser, onAuthState } from "./firebase/auth";
+import { actions, getSessionUidSync, getState, getVersion, subscribeStore } from "./store";
+import { waitForAuth, onAuthState } from "./firebase/auth";
 
 // Подписка на всё хранилище
 export function useDB(): DB {
@@ -14,7 +14,7 @@ export function useAuth(): { user: User | null; loading: boolean } {
   const db = useDB();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(() => {
-    const uid = getSessionUid();
+    const uid = getSessionUidSync();
     return uid ? db.users.find((u) => u.id === uid) ?? null : null;
   });
 

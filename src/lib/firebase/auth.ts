@@ -23,12 +23,10 @@ const authListeners: ((user: FirebaseUser | null) => void)[] = [];
 // Инициализация с восстановлением сессии
 export function initAuth() {
   return new Promise<void>((resolve) => {
-    // Если уже готово, сразу разрешаем
     if (authReady) {
       resolve();
       return;
     }
-    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       authUser = user;
       authReady = true;

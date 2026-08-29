@@ -205,36 +205,11 @@ function notice(db: DB, userId: string, text: string, kind: Notice['kind'] = 'in
 }
 
 // ============================================================
-//  АУТЕНТИФИКАЦИЯ — ИСПРАВЛЕННАЯ
+//  АУТЕНТИФИКАЦИЯ
 // ============================================================
 
 let sessionUid: string | null = null;
 let authInitialized = false;
-
-// Функция для получения текущего пользователя с ожиданием
-export async function getSessionUidAsync(): Promise<string | null> {
-  if (!authInitialized) {
-    const user = await waitForAuth();
-    authInitialized = true;
-    if (user) {
-      sessionUid = user.uid;
-      try {
-        sessionStorage.setItem('gt_uid', user.uid);
-      } catch {}
-    } else {
-      sessionUid = null;
-      try {
-        sessionStorage.removeItem('gt_uid');
-      } catch {}
-    }
-  }
-  return sessionUid;
-}
-
-// Синхронная версия для обратной совместимости
-export function getSessionUid(): string | null {
-  return sessionUid;
-}
 
 // Инициализация при загрузке
 onAuthState(async (user) => {
@@ -1414,7 +1389,7 @@ export const actions = {
 };
 
 // ============================================================
-//  ЭКСПОРТЫ
+//  ЭКСПОРТЫ (ТОЛЬКО ОДИН РАЗ)
 // ============================================================
 
 export function subscribeStore(fn: () => void): () => void {
@@ -1430,10 +1405,30 @@ export function getVersion(): number {
   return version;
 }
 
-// Экспортируем асинхронную версию для получения сессии
-export { getSessionUidAsync as getSessionUidAsync };
-// Синхронная версия для обратной совместимости
-export { getSessionUid };
+// Единая функция для получения sessionUid (асинхронная)
+export async function getSessionUid(): Promise<string | null> {
+  if (!authInitialized) {
+    const user = await waitForAuth();
+    authInitialized = true;
+    if (user) {
+      sessionUid = user.uid;
+      try {
+        sessionStorage.setItem('gt_uid', user.uid);
+      } catch {}
+    } else {
+      sessionUid = null;
+      try {
+        sessionStorage.removeItem('gt_uid');
+      } catch {}
+    }
+  }
+  return sessionUid;
+}
+
+// Синхронная версия для быстрого доступа — ЭТО ЕДИНСТВЕННОЕ ОБЪЯВЛЕНИЕ
+export function getSessionUidSync(): string | null {
+  return sessionUid;
+}
 
 export function noticesFor(db: DB, userId: string): Notice[] {
   return db.notices.filter((n) => n.userId === userId || n.userId === 'all');
