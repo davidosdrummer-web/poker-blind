@@ -96,17 +96,37 @@ function LiveConsole({ t, db, navigate, onRefresh }: {
 
   // Автоматическое повышение блайндов
   useEffect(() => {
+    // Защита от множественных вызовов
+    if ((window as any).isTransitioning) return;
+
     if (t.status === "active" && t.levelStartedAt != null) {
       const remaining = levelRemainingMs(t, now);
+      // Проверяем, что время вышло и есть следующий уровень
       if (remaining <= 0 && t.currentLevel < t.levels.length - 1) {
-        console.log('🔵 Автоматическое повышение уровня...');
+        console.log('🔵 Автоматическое повышение уровня...', { 
+          currentLevel: t.currentLevel, 
+          remaining,
+          now,
+          levelStartedAt: t.levelStartedAt 
+        });
+        
+        (window as any).isTransitioning = true;
+        
         (async () => {
-          const err = await actions.nextLevel(t.id);
-          if (err) {
-            toast(err, "err");
-          } else {
-            toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
-            onRefresh();
+          try {
+            const err = await actions.nextLevel(t.id);
+            if (err) {
+              toast(err, "err");
+            } else {
+              toast(`Уровень ${t.currentLevel + 2} — блайнды повышены`, "info");
+              onRefresh();
+            }
+          } catch (e) {
+            console.error("Ошибка при повышении уровня:", e);
+            toast("Ошибка авто-перехода", "err");
+          } finally {
+            // Снимаем блокировку через 2 секунды
+            setTimeout(() => { (window as any).isTransitioning = false; }, 2000);
           }
         })();
       }
